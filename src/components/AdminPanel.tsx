@@ -1,15 +1,17 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Shell from "@/components/Shell";
 import Podium from "@/components/Podium";
 import StandingsTable from "@/components/StandingsTable";
 import ScoreGrid from "@/components/ScoreGrid";
+import CourseEditor from "@/components/CourseEditor";
 import { useRoundState } from "@/hooks/useRoundState";
+import { TEE_COLOR_LABELS } from "@/lib/courses";
 import { groupCodes, rankPlayers } from "@/lib/ranking";
 import { recognizeScorecard } from "@/lib/ocr";
-import type { CourseHole, RoundState } from "@/lib/types";
+import type { CourseHole, GolfCourse, RoundState } from "@/lib/types";
 import type { UpsertPlayerInput } from "@/lib/store";
 
 export default function AdminPanel({ slug }: { slug: string }) {
@@ -19,8 +21,12 @@ export default function AdminPanel({ slug }: { slug: string }) {
   const [pin, setPin] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"live" | "course" | "players">("live");
+  const [tab, setTab] = useState<"live" | "course" | "players" | "catalog">(
+    "live",
+  );
   const [ocrNote, setOcrNote] = useState<string | null>(null);
+  const [courses, setCourses] = useState<GolfCourse[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const standings = useMemo(
@@ -31,6 +37,20 @@ export default function AdminPanel({ slug }: { slug: string }) {
     () => (state ? groupCodes(state.players) : []),
     [state],
   );
+
+  const loadCourses = useCallback(async () => {
+    const res = await fetch("/api/courses", { cache: "no-store" });
+    const body = (await res.json()) as { courses: GolfCourse[] };
+    setCourses(body.courses || []);
+  }, []);
+
+  useEffect(() => {
+    if (admin) void loadCourses();
+  }, [admin, loadCourses]);
+
+  useEffect(() => {
+    if (state?.round.courseId) setSelectedCourseId(state.round.courseId);
+  }, [state?.round.courseId]);
 
   async function login() {
     setLoginError(null);
@@ -63,6 +83,24 @@ export default function AdminPanel({ slug }: { slug: string }) {
     }
   }
 
+  async function applyCatalogCourse() {
+    if (!selectedCourseId) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/rounds/${slug}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ courseId: selectedCourseId }),
+      });
+      const body = (await res.json()) as { state?: RoundState; error?: string };
+      if (!res.ok) throw new Error(body.error || "적용 실패");
+      if (body.state) setState(body.state);
+      setOcrNote("선택한 코스의 Par/SI가 이 대회에 적용되었습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function savePlayers(players: UpsertPlayerInput[]) {
     setBusy(true);
     try {
@@ -81,7 +119,6 @@ export default function AdminPanel({ slug }: { slug: string }) {
 
   async function saveScore(playerId: string, hole: number, gross: number | null) {
     if (!state) return;
-    // optimistic
     const nextScores = state.scores.filter(
       (s) => !(s.playerId === playerId && s.hole === hole),
     );
@@ -130,7 +167,7 @@ export default function AdminPanel({ slug }: { slug: string }) {
   if (error || !state) {
     return (
       <Shell title="Admin">
-        <p className="text-red-200">{error || "라운드 없음"}</p>
+        <p className="text-red-200">{error || "대회 없음"}</p>
       </Shell>
     );
   }
@@ -167,7 +204,9 @@ export default function AdminPanel({ slug }: { slug: string }) {
   return (
     <Shell
       title={`${state.round.name} · Admin`}
-      subtitle="실시간 전체 스코어 · 코스/플레이어 설정"
+      subtitle={`${state.round.date} · ${state.round.courseName} · ${TEE_COLOR_LABELS[state.round.teeColor]}${
+        state.round.lengthMeters != null ? ` · ${state.round.lengthMeters}m` : ""
+      }`}
       actions={
         <>
           <Link className="btn-ghost" href={`/r/${slug}`}>
@@ -185,7 +224,8 @@ export default function AdminPanel({ slug }: { slug: string }) {
         {(
           [
             ["live", "라이브 보드"],
-            ["course", "코스 (Par/SI)"],
+            ["course", "대회 코스"],
+            ["catalog", "코스 관리"],
             ["players", "플레이어 / 조"],
           ] as const
         ).map(([id, label]) => (
@@ -217,13 +257,42 @@ export default function AdminPanel({ slug }: { slug: string }) {
 
       {tab === "course" && (
         <div className="space-y-4">
+          <div className="rounded-sm border border-white/10 bg-black/25 p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[var(--foam)]/45">
+              골프 코스 선택
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <select
+                className="min-w-[16rem] flex-1 rounded-sm border border-white/15 bg-black/30 px-3 py-2 text-[var(--foam)] outline-none focus:border-[var(--lime)]"
+                value={selectedCourseId}
+                onChange={(e) => setSelectedCourseId(e.target.value)}
+              >
+                <option value="">코스 선택</option>
+                {courses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} · {TEE_COLOR_LABELS[c.teeColor]}
+                    {c.lengthMeters != null ? ` · ${c.lengthMeters}m` : ""}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn-solid"
+                disabled={busy || !selectedCourseId}
+                onClick={() => void applyCatalogCourse()}
+              >
+                이 대회에 적용
+              </button>
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              className="btn-solid"
+              className="btn-ghost"
               onClick={() => fileRef.current?.click()}
             >
-              스코어카드 사진으로 Par/SI 채우기
+              사진으로 Par/SI 채우기
             </button>
             <input
               ref={fileRef}
@@ -242,7 +311,7 @@ export default function AdminPanel({ slug }: { slug: string }) {
               className="btn-ghost"
               onClick={() => void saveCourse(state.course)}
             >
-              코스 저장
+              이 대회 Par/SI 저장
             </button>
           </div>
           {ocrNote && (
@@ -308,6 +377,10 @@ export default function AdminPanel({ slug }: { slug: string }) {
             </table>
           </div>
         </div>
+      )}
+
+      {tab === "catalog" && (
+        <CourseEditor courses={courses} onChanged={loadCourses} />
       )}
 
       {tab === "players" && (

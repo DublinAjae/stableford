@@ -22,4 +22,9 @@ export function getStore(): RoundStore {
   return fileStore;
 }
 
-export type { RoundStore, UpsertPlayerInput } from "./types";
+export type {
+  RoundStore,
+  UpsertPlayerInput,
+  UpsertGolfCourseInput,
+  CreateRoundInput,
+} from "./types";

@@ -25,6 +25,31 @@ export type CourseHole = {
   strokeIndex: number;
 };
 
+export const TEE_COLORS = [
+  "white",
+  "yellow",
+  "blue",
+  "red",
+  "black",
+  "gold",
+  "green",
+  "orange",
+] as const;
+
+export type TeeColor = (typeof TEE_COLORS)[number];
+
+export type GolfCourse = {
+  id: string;
+  name: string;
+  /** Total course length (meters). */
+  lengthMeters: number | null;
+  teeColor: TeeColor;
+  holeCount: 9 | 18;
+  holes: CourseHole[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Player = {
   id: string;
   name: string;
@@ -42,7 +67,14 @@ export type Score = {
 export type RoundMeta = {
   id: string;
   slug: string;
+  /** Tournament / event name */
   name: string;
+  /** YYYY-MM-DD */
+  date: string;
+  courseId: string | null;
+  courseName: string;
+  teeColor: TeeColor;
+  lengthMeters: number | null;
   updatedAt: string;
 };
 
@@ -51,6 +83,15 @@ export type RoundState = {
   course: CourseHole[];
   players: Player[];
   scores: Score[];
+};
+
+export type RoundListItem = {
+  slug: string;
+  name: string;
+  date: string;
+  courseName: string;
+  teeColor: TeeColor;
+  updatedAt: string;
 };
 
 export type PlayerStanding = {

@@ -1,52 +1,72 @@
 import { NextResponse } from "next/server";
+import { isGlobalAdmin } from "@/lib/auth";
+import { tournamentSlug } from "@/lib/courses";
 import { getStore, storeKind } from "@/lib/store";
-import { defaultCourse } from "@/lib/ranking";
-import { isAdminFor } from "@/lib/auth";
 
 export async function GET() {
   const store = getStore();
-  const rounds = await store.listRounds();
-  return NextResponse.json({ rounds, store: storeKind() });
+  const [rounds, courses] = await Promise.all([
+    store.listRounds(),
+    store.listCourses(),
+  ]);
+  return NextResponse.json({
+    rounds,
+    courses,
+    store: storeKind(),
+    admin: await isGlobalAdmin(),
+  });
 }
 
 export async function POST(req: Request) {
+  if (!(await isGlobalAdmin())) {
+    return NextResponse.json(
+      { error: "대회 생성은 admin 로그인이 필요합니다." },
+      { status: 401 },
+    );
+  }
+
   const body = (await req.json()) as {
-    slug?: string;
     name?: string;
+    date?: string;
+    slug?: string;
+    courseId?: string;
   };
-  const slug = (body.slug || "")
+
+  const name = (body.name || "").trim();
+  const date = (body.date || new Date().toISOString().slice(0, 10)).trim();
+  if (!name) {
+    return NextResponse.json({ error: "대회 이름이 필요합니다." }, { status: 400 });
+  }
+  if (!body.courseId) {
+    return NextResponse.json({ error: "골프 코스를 선택해 주세요." }, { status: 400 });
+  }
+
+  const store = getStore();
+  const course = await store.getCourse(body.courseId);
+  if (!course) {
+    return NextResponse.json({ error: "코스를 찾을 수 없습니다." }, { status: 404 });
+  }
+
+  let slug = (body.slug || tournamentSlug(date, course.name))
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
-  const name = (body.name || "").trim();
-  if (!slug || !name) {
-    return NextResponse.json(
-      { error: "name과 slug가 필요합니다." },
-      { status: 400 },
-    );
-  }
 
-  // Creating a round requires either no rounds yet, or admin of an existing slug via header — for MVP, require admin pin cookie for any existing round OR allow if list empty / ADMIN creating
-  const store = getStore();
   const existing = await store.listRounds();
-  if (existing.length > 0) {
-    // allow if admin of any known round cookie matches first round, or body includes being first-time
-    const ok = await isAdminFor(existing[0].slug);
-    if (!ok) {
-      return NextResponse.json(
-        { error: "라운드 생성은 admin 로그인이 필요합니다." },
-        { status: 401 },
-      );
-    }
+  if (existing.some((r) => r.slug === slug)) {
+    let n = 2;
+    while (existing.some((r) => r.slug === `${slug}-${n}`)) n += 1;
+    slug = `${slug}-${n}`;
   }
 
   try {
     const state = await store.createRound({
       slug,
       name,
-      course: defaultCourse(),
+      date,
+      courseId: course.id,
     });
     return NextResponse.json({ state });
   } catch (e) {

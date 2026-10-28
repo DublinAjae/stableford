@@ -6,6 +6,7 @@ import Shell from "@/components/Shell";
 import Podium from "@/components/Podium";
 import StandingsTable from "@/components/StandingsTable";
 import { useRoundState } from "@/hooks/useRoundState";
+import { TEE_COLOR_LABELS } from "@/lib/courses";
 import { groupCodes, rankPlayers } from "@/lib/ranking";
 
 export default function PublicBoard({ slug }: { slug: string }) {
@@ -30,7 +31,7 @@ export default function PublicBoard({ slug }: { slug: string }) {
   if (error || !state) {
     return (
       <Shell title="Live">
-        <p className="text-red-200">{error || "라운드 없음"}</p>
+        <p className="text-red-200">{error || "대회 없음"}</p>
       </Shell>
     );
   }
@@ -38,7 +39,7 @@ export default function PublicBoard({ slug }: { slug: string }) {
   return (
     <Shell
       title={state.round.name}
-      subtitle="실시간 Stableford 순위"
+      subtitle={`${state.round.date} · ${state.round.courseName} · ${TEE_COLOR_LABELS[state.round.teeColor]} · 실시간 순위`}
       actions={
         <>
           {groups.map((g) => (
