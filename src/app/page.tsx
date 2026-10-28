@@ -4,13 +4,15 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import CourseEditor from "@/components/CourseEditor";
+import MemberEditor from "@/components/MemberEditor";
 import { TEE_COLOR_LABELS } from "@/lib/courses";
-import type { GolfCourse, RoundListItem } from "@/lib/types";
+import type { GolfCourse, Member, RoundListItem } from "@/lib/types";
 
 export default function HomePage() {
   const router = useRouter();
   const [rounds, setRounds] = useState<RoundListItem[]>([]);
   const [courses, setCourses] = useState<GolfCourse[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
   const [admin, setAdmin] = useState(false);
   const [pin, setPin] = useState("");
   const [name, setName] = useState("");
@@ -18,17 +20,19 @@ export default function HomePage() {
   const [courseId, setCourseId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [showCourses, setShowCourses] = useState(false);
+  const [manage, setManage] = useState<"none" | "courses" | "members">("none");
 
   const load = useCallback(async () => {
     const res = await fetch("/api/rounds", { cache: "no-store" });
     const body = (await res.json()) as {
       rounds: RoundListItem[];
       courses: GolfCourse[];
+      members: Member[];
       admin: boolean;
     };
     setRounds(body.rounds || []);
     setCourses(body.courses || []);
+    setMembers(body.members || []);
     setAdmin(Boolean(body.admin));
     if (!courseId && body.courses?.[0]) setCourseId(body.courses[0].id);
   }, [courseId]);
@@ -50,7 +54,7 @@ export default function HomePage() {
       return;
     }
     await load();
-    setShowCourses(true);
+    setManage("courses");
   }
 
   async function createTournament() {
@@ -94,8 +98,8 @@ export default function HomePage() {
           STABLEFORD
         </p>
         <p className="animate-rise-delay mt-5 max-w-lg text-base leading-relaxed text-[var(--foam)]/75 sm:text-lg">
-          대회별로 날짜·코스를 저장하고, 조별 스코어 입력과 실시간 순위를 따로
-          공유하세요.
+          코스·회원 명단을 저장해 두고, 대회마다 날짜·코스·플레이어를 골라
+          별도 링크로 운영하세요.
         </p>
 
         {rounds.length > 0 && (
@@ -201,20 +205,41 @@ export default function HomePage() {
               >
                 대회 만들고 Admin 열기
               </button>
-              <button
-                type="button"
-                className="btn-ghost w-full"
-                onClick={() => setShowCourses((v) => !v)}
-              >
-                {showCourses ? "코스 관리 닫기" : "골프 코스 추가 / 관리"}
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className={manage === "courses" ? "btn-solid" : "btn-ghost"}
+                  onClick={() =>
+                    setManage((v) => (v === "courses" ? "none" : "courses"))
+                  }
+                >
+                  코스 관리
+                </button>
+                <button
+                  type="button"
+                  className={manage === "members" ? "btn-solid" : "btn-ghost"}
+                  onClick={() =>
+                    setManage((v) => (v === "members" ? "none" : "members"))
+                  }
+                >
+                  회원 명단
+                </button>
+              </div>
+              <p className="text-xs text-[var(--foam)]/40">
+                회원 {members.length}명 · 코스 {courses.length}개
+              </p>
             </>
           )}
         </div>
 
-        {admin && showCourses && (
+        {admin && manage === "courses" && (
           <div className="mt-8">
             <CourseEditor courses={courses} onChanged={load} />
+          </div>
+        )}
+        {admin && manage === "members" && (
+          <div className="mt-8">
+            <MemberEditor members={members} onChanged={load} />
           </div>
         )}
       </section>

@@ -4,6 +4,7 @@ import { defaultCourse } from "@/lib/ranking";
 import type {
   CourseHole,
   GolfCourse,
+  Member,
   Player,
   RoundListItem,
   RoundState,
@@ -14,27 +15,35 @@ import type {
   CreateRoundInput,
   RoundStore,
   UpsertGolfCourseInput,
+  UpsertMemberInput,
   UpsertPlayerInput,
 } from "./types";
 
 export type DbShape = {
-  version: 2;
+  version: 3;
   courses: GolfCourse[];
+  members: Member[];
   rounds: RoundState[];
 };
 
 export function emptyDb(): DbShape {
-  return { version: 2, courses: [], rounds: [] };
+  return { version: 3, courses: [], members: [], rounds: [] };
 }
 
 function migrate(raw: unknown): DbShape {
   if (!raw || typeof raw !== "object") return emptyDb();
-  const obj = raw as { version?: number; courses?: GolfCourse[]; rounds?: RoundState[] };
+  const obj = raw as {
+    version?: number;
+    courses?: GolfCourse[];
+    members?: Member[];
+    rounds?: RoundState[];
+  };
   const courses = Array.isArray(obj.courses) ? obj.courses : [];
+  const members = Array.isArray(obj.members) ? obj.members : [];
   const rounds = (Array.isArray(obj.rounds) ? obj.rounds : []).map((r) =>
     normalizeRound(r),
   );
-  return { version: 2, courses, rounds };
+  return { version: 3, courses, members, rounds };
 }
 
 function normalizeRound(r: RoundState): RoundState {
@@ -59,7 +68,10 @@ function normalizeRound(r: RoundState): RoundState {
       updatedAt: meta.updatedAt,
     },
     course: r.course?.length ? r.course : defaultCourse(),
-    players: r.players || [],
+    players: (r.players || []).map((p) => ({
+      ...p,
+      memberId: p.memberId ?? null,
+    })),
     scores: r.scores || [],
   };
 }
@@ -217,6 +229,7 @@ export function createJsonStore(io: {
       const prev = db.rounds[idx];
       const players: Player[] = playersInput.map((p, i) => ({
         id: p.id && prev.players.some((x) => x.id === p.id) ? p.id : randomUUID(),
+        memberId: p.memberId ?? null,
         name: p.name.trim() || `Player ${i + 1}`,
         courseHandicap: p.courseHandicap,
         groupCode: (p.groupCode || "A").toUpperCase(),
@@ -325,6 +338,53 @@ export function createJsonStore(io: {
     async deleteCourse(id) {
       const db = await load();
       db.courses = db.courses.filter((c) => c.id !== id);
+      await save(db);
+    },
+
+    async listMembers() {
+      const db = await load();
+      return db.members.slice().sort((a, b) => a.name.localeCompare(b.name));
+    },
+
+    async getMember(id) {
+      const db = await load();
+      return db.members.find((m) => m.id === id) ?? null;
+    },
+
+    async upsertMember(input: UpsertMemberInput) {
+      const db = await load();
+      const now = new Date().toISOString();
+      const name = input.name.trim() || "Untitled";
+      const handicap = Number.isFinite(input.handicap) ? input.handicap : 18;
+      if (input.id) {
+        const idx = db.members.findIndex((m) => m.id === input.id);
+        if (idx >= 0) {
+          const next: Member = {
+            ...db.members[idx],
+            name,
+            handicap,
+            updatedAt: now,
+          };
+          db.members[idx] = next;
+          await save(db);
+          return next;
+        }
+      }
+      const created: Member = {
+        id: randomUUID(),
+        name,
+        handicap,
+        createdAt: now,
+        updatedAt: now,
+      };
+      db.members.push(created);
+      await save(db);
+      return created;
+    },
+
+    async deleteMember(id) {
+      const db = await load();
+      db.members = db.members.filter((m) => m.id !== id);
       await save(db);
     },
   };

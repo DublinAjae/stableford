@@ -50,8 +50,19 @@ export type GolfCourse = {
   updatedAt: string;
 };
 
+/** Reusable club member roster (name + handicap). */
+export type Member = {
+  id: string;
+  name: string;
+  handicap: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Player = {
   id: string;
+  /** Link back to catalog member when imported. */
+  memberId: string | null;
   name: string;
   courseHandicap: number;
   groupCode: string;

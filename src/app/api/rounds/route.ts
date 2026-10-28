@@ -5,13 +5,15 @@ import { getStore, storeKind } from "@/lib/store";
 
 export async function GET() {
   const store = getStore();
-  const [rounds, courses] = await Promise.all([
+  const [rounds, courses, members] = await Promise.all([
     store.listRounds(),
     store.listCourses(),
+    store.listMembers(),
   ]);
   return NextResponse.json({
     rounds,
     courses,
+    members,
     store: storeKind(),
     admin: await isGlobalAdmin(),
   });

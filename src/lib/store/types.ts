@@ -1,6 +1,7 @@
 import type {
   CourseHole,
   GolfCourse,
+  Member,
   RoundListItem,
   RoundState,
   Score,
@@ -9,10 +10,17 @@ import type {
 
 export type UpsertPlayerInput = {
   id?: string;
+  memberId?: string | null;
   name: string;
   courseHandicap: number;
   groupCode: string;
   sortOrder: number;
+};
+
+export type UpsertMemberInput = {
+  id?: string;
+  name: string;
+  handicap: number;
 };
 
 export type CreateRoundInput = {
@@ -71,4 +79,9 @@ export type RoundStore = {
   getCourse(id: string): Promise<GolfCourse | null>;
   upsertCourse(input: UpsertGolfCourseInput): Promise<GolfCourse>;
   deleteCourse(id: string): Promise<void>;
+
+  listMembers(): Promise<Member[]>;
+  getMember(id: string): Promise<Member | null>;
+  upsertMember(input: UpsertMemberInput): Promise<Member>;
+  deleteMember(id: string): Promise<void>;
 };

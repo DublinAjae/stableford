@@ -7,11 +7,12 @@ import Podium from "@/components/Podium";
 import StandingsTable from "@/components/StandingsTable";
 import ScoreGrid from "@/components/ScoreGrid";
 import CourseEditor from "@/components/CourseEditor";
+import MemberEditor from "@/components/MemberEditor";
 import { useRoundState } from "@/hooks/useRoundState";
 import { TEE_COLOR_LABELS } from "@/lib/courses";
 import { groupCodes, rankPlayers } from "@/lib/ranking";
 import { recognizeScorecard } from "@/lib/ocr";
-import type { CourseHole, GolfCourse, RoundState } from "@/lib/types";
+import type { CourseHole, GolfCourse, Member, RoundState } from "@/lib/types";
 import type { UpsertPlayerInput } from "@/lib/store";
 
 export default function AdminPanel({ slug }: { slug: string }) {
@@ -21,11 +22,12 @@ export default function AdminPanel({ slug }: { slug: string }) {
   const [pin, setPin] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"live" | "course" | "players" | "catalog">(
-    "live",
-  );
+  const [tab, setTab] = useState<
+    "live" | "course" | "players" | "catalog" | "members"
+  >("live");
   const [ocrNote, setOcrNote] = useState<string | null>(null);
   const [courses, setCourses] = useState<GolfCourse[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -44,9 +46,18 @@ export default function AdminPanel({ slug }: { slug: string }) {
     setCourses(body.courses || []);
   }, []);
 
+  const loadMembers = useCallback(async () => {
+    const res = await fetch("/api/members", { cache: "no-store" });
+    const body = (await res.json()) as { members: Member[] };
+    setMembers(body.members || []);
+  }, []);
+
   useEffect(() => {
-    if (admin) void loadCourses();
-  }, [admin, loadCourses]);
+    if (admin) {
+      void loadCourses();
+      void loadMembers();
+    }
+  }, [admin, loadCourses, loadMembers]);
 
   useEffect(() => {
     if (state?.round.courseId) setSelectedCourseId(state.round.courseId);
@@ -226,6 +237,7 @@ export default function AdminPanel({ slug }: { slug: string }) {
             ["live", "라이브 보드"],
             ["course", "대회 코스"],
             ["catalog", "코스 관리"],
+            ["members", "회원 명단"],
             ["players", "플레이어 / 조"],
           ] as const
         ).map(([id, label]) => (
@@ -383,9 +395,14 @@ export default function AdminPanel({ slug }: { slug: string }) {
         <CourseEditor courses={courses} onChanged={loadCourses} />
       )}
 
+      {tab === "members" && (
+        <MemberEditor members={members} onChanged={loadMembers} />
+      )}
+
       {tab === "players" && (
         <PlayersEditor
           state={state}
+          members={members}
           busy={busy}
           onSave={(players) => void savePlayers(players)}
           onLocal={(players) =>
@@ -393,6 +410,7 @@ export default function AdminPanel({ slug }: { slug: string }) {
               ...state,
               players: players.map((p, i) => ({
                 id: p.id || `tmp-${i}`,
+                memberId: p.memberId ?? null,
                 name: p.name,
                 courseHandicap: p.courseHandicap,
                 groupCode: p.groupCode,
@@ -408,38 +426,122 @@ export default function AdminPanel({ slug }: { slug: string }) {
 
 function PlayersEditor({
   state,
+  members,
   busy,
   onSave,
   onLocal,
 }: {
   state: RoundState;
+  members: Member[];
   busy: boolean;
   onSave: (players: UpsertPlayerInput[]) => void;
   onLocal: (players: UpsertPlayerInput[]) => void;
 }) {
+  const [pickIds, setPickIds] = useState<string[]>([]);
+  const [defaultGroup, setDefaultGroup] = useState("A");
+
   const rows: UpsertPlayerInput[] = state.players.map((p, i) => ({
     id: p.id,
+    memberId: p.memberId,
     name: p.name,
     courseHandicap: p.courseHandicap,
     groupCode: p.groupCode,
     sortOrder: p.sortOrder ?? i,
   }));
 
+  const already = new Set(
+    rows.map((r) => r.memberId).filter(Boolean) as string[],
+  );
+  const available = members.filter((m) => !already.has(m.id));
+
   function update(i: number, patch: Partial<UpsertPlayerInput>) {
     const next = rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
     onLocal(next);
   }
 
+  function importSelected() {
+    const selected = members.filter((m) => pickIds.includes(m.id));
+    if (!selected.length) return;
+    const next = [
+      ...rows,
+      ...selected.map((m, i) => ({
+        memberId: m.id,
+        name: m.name,
+        courseHandicap: m.handicap,
+        groupCode: defaultGroup.toUpperCase() || "A",
+        sortOrder: rows.length + i,
+      })),
+    ];
+    onLocal(next);
+    setPickIds([]);
+  }
+
+  function togglePick(id: string) {
+    setPickIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <div className="rounded-sm border border-white/10 bg-black/25 p-4">
+        <p className="text-xs uppercase tracking-[0.16em] text-[var(--foam)]/45">
+          회원 명단에서 불러오기
+        </p>
+        {available.length === 0 ? (
+          <p className="mt-3 text-sm text-[var(--foam)]/45">
+            불러올 회원이 없습니다. 「회원 명단」탭에서 먼저 추가하세요.
+          </p>
+        ) : (
+          <>
+            <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+              {available.map((m) => (
+                <li key={m.id}>
+                  <label className="flex cursor-pointer items-center gap-2 rounded-sm border border-white/10 bg-black/20 px-3 py-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={pickIds.includes(m.id)}
+                      onChange={() => togglePick(m.id)}
+                    />
+                    <span className="text-[var(--foam)]">{m.name}</span>
+                    <span className="text-[var(--foam)]/45">HCP {m.handicap}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <label className="text-xs text-[var(--foam)]/45">
+                기본 조
+                <input
+                  className="field ml-2"
+                  value={defaultGroup}
+                  onChange={(e) =>
+                    setDefaultGroup(e.target.value.toUpperCase().slice(0, 2))
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                className="btn-solid"
+                disabled={!pickIds.length}
+                onClick={importSelected}
+              >
+                선택 회원 추가
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          className="btn-solid"
+          className="btn-ghost"
           onClick={() =>
             onLocal([
               ...rows,
               {
+                memberId: null,
                 name: `Player ${rows.length + 1}`,
                 courseHandicap: 18,
                 groupCode: "A",
@@ -448,11 +550,11 @@ function PlayersEditor({
             ])
           }
         >
-          플레이어 추가
+          직접 추가
         </button>
         <button
           type="button"
-          className="btn-ghost"
+          className="btn-solid"
           disabled={busy}
           onClick={() => onSave(rows)}
         >

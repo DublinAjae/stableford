@@ -26,5 +26,6 @@ export type {
   RoundStore,
   UpsertPlayerInput,
   UpsertGolfCourseInput,
+  UpsertMemberInput,
   CreateRoundInput,
 } from "./types";
