@@ -96,3 +96,41 @@ input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
   opacity: 0.35;
 }
+
+.btn-solid {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.2rem;
+  background: var(--lime);
+  padding: 0.65rem 1rem;
+  font-size: 0.925rem;
+  font-weight: 600;
+  color: var(--ink);
+  transition: filter 0.15s ease;
+}
+
+.btn-solid:hover {
+  filter: brightness(1.08);
+}
+
+.btn-solid:disabled {
+  opacity: 0.55;
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.2rem;
+  border: 1px solid rgba(238, 246, 234, 0.22);
+  padding: 0.65rem 1rem;
+  font-size: 0.925rem;
+  color: var(--foam);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.btn-ghost:hover {
+  border-color: rgba(238, 246, 234, 0.45);
+  background: rgba(255, 255, 255, 0.04);
+}
