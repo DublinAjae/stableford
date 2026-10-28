@@ -14,6 +14,22 @@ function grossOf(
   );
 }
 
+function sumGross(
+  state: RoundState,
+  playerId: string,
+  holes: number[],
+): number | null {
+  let total = 0;
+  let any = false;
+  for (const hole of holes) {
+    const g = grossOf(state, playerId, hole);
+    if (g == null) continue;
+    any = true;
+    total += g;
+  }
+  return any ? total : null;
+}
+
 function parClass(par: number): string {
   if (par === 3) return "par-3 font-semibold";
   if (par === 5) return "par-5 font-semibold";
@@ -53,9 +69,7 @@ function ScoreStepper({
           className="stepper-btn"
           aria-label="타수 증가"
           onClick={() =>
-            onChange(
-              Math.min(20, (value ?? Math.max(1, par - 1)) + 1),
-            )
+            onChange(Math.min(20, (value ?? Math.max(1, par - 1)) + 1))
           }
         >
           ▲
@@ -77,6 +91,45 @@ function ScoreStepper({
   );
 }
 
+function SubtotalRow({
+  label,
+  parSum,
+  players,
+  values,
+}: {
+  label: string;
+  parSum: number;
+  players: Player[];
+  values: { gross: number | null; points: number }[];
+}) {
+  return (
+    <tr className="score-subtotal border-y border-white/20">
+      <td className="sticky left-0 bg-[#0a2f1c] px-3 py-2.5 font-semibold">
+        {label}
+      </td>
+      <td className="px-2 py-2.5 font-semibold tabular-nums text-[var(--lime)]">
+        {parSum}
+      </td>
+      <td className="px-2 py-2.5 text-[var(--foam)]/35">—</td>
+      {players.map((p, i) => {
+        const v = values[i];
+        return (
+          <td key={p.id} className="px-2 py-2.5">
+            <div className="flex items-baseline gap-1">
+              <span className="font-semibold tabular-nums text-[var(--foam)]">
+                {v?.gross ?? "—"}
+              </span>
+              <span className="text-[10px] font-semibold text-[var(--lime)]">
+                {v?.points ?? 0}p
+              </span>
+            </div>
+          </td>
+        );
+      })}
+    </tr>
+  );
+}
+
 export default function ScoreGrid({
   state,
   players,
@@ -91,16 +144,55 @@ export default function ScoreGrid({
   const course: CourseHole[] = state.course
     .slice()
     .sort((a, b) => a.hole - b.hole);
+  const outHoles = course.filter((h) => h.hole <= 9);
+  const inHoles = course.filter((h) => h.hole > 9);
+  const standings = players.map((p) =>
+    buildPlayerStanding(p, state.course, state.scores),
+  );
 
-  const bestByHole = new Map<number, number>();
-  for (const hole of course) {
-    let best: number | null = null;
-    for (const p of players) {
-      const g = grossOf(state, p.id, hole.hole);
-      if (g == null) continue;
-      if (best == null || g < best) best = g;
-    }
-    if (best != null) bestByHole.set(hole.hole, best);
+  function holeRows(holes: CourseHole[]) {
+    return holes.map((hole) => (
+      <tr
+        key={hole.hole}
+        className={`border-b border-white/5 ${
+          hole.hole === 9 || hole.hole === 18 ? "border-b-transparent" : ""
+        }`}
+      >
+        <td className="sticky left-0 bg-[#062416]/95 px-3 py-2 font-medium tabular-nums">
+          {hole.hole}
+        </td>
+        <td className={`px-2 py-2 tabular-nums ${parClass(hole.par)}`}>
+          {hole.par}
+        </td>
+        <td className="px-2 py-2 tabular-nums text-[var(--foam)]/70">
+          {hole.strokeIndex}
+        </td>
+        {players.map((p, pi) => {
+          const gross = grossOf(state, p.id, hole.hole);
+          const pts = standings[pi]?.holePoints[hole.hole - 1];
+          return (
+            <td key={p.id} className="px-2 py-1.5">
+              {editable ? (
+                <ScoreStepper
+                  value={gross}
+                  par={hole.par}
+                  onChange={(n) => onChangeGross?.(p.id, hole.hole, n)}
+                />
+              ) : (
+                <div className="flex items-baseline gap-1">
+                  <span className="tabular-nums text-[var(--foam)]">
+                    {gross ?? "—"}
+                  </span>
+                  {pts != null && (
+                    <span className="text-[10px] text-[var(--lime)]">{pts}p</span>
+                  )}
+                </div>
+              )}
+            </td>
+          );
+        })}
+      </tr>
+    ));
   }
 
   return (
@@ -122,87 +214,51 @@ export default function ScoreGrid({
           </tr>
         </thead>
         <tbody>
-          {course.map((hole) => (
-            <tr
-              key={hole.hole}
-              className={`border-b border-white/5 ${
-                hole.hole === 9 ? "border-b-white/20" : ""
-              }`}
-            >
-              <td className="sticky left-0 bg-[#062416]/95 px-3 py-2 font-medium tabular-nums">
-                {hole.hole}
-              </td>
-              <td className={`px-2 py-2 tabular-nums ${parClass(hole.par)}`}>
-                {hole.par}
-              </td>
-              <td className="px-2 py-2 tabular-nums text-[var(--foam)]/70">
-                {hole.strokeIndex}
-              </td>
-              {players.map((p) => {
-                const gross = grossOf(state, p.id, hole.hole);
-                const standing = buildPlayerStanding(
-                  p,
-                  state.course,
-                  state.scores,
-                );
-                const pts = standing.holePoints[hole.hole - 1];
-                const isBest =
-                  gross != null && bestByHole.get(hole.hole) === gross;
-                return (
-                  <td
-                    key={p.id}
-                    className={`px-2 py-1.5 ${isBest ? "score-best" : ""}`}
-                  >
-                    {editable ? (
-                      <ScoreStepper
-                        value={gross}
-                        par={hole.par}
-                        onChange={(n) => onChangeGross?.(p.id, hole.hole, n)}
-                      />
-                    ) : (
-                      <div className="flex items-baseline gap-1">
-                        <span
-                          className={`tabular-nums ${
-                            isBest
-                              ? "font-bold text-[var(--lime)]"
-                              : "text-[var(--foam)]"
-                          }`}
-                        >
-                          {gross ?? "—"}
-                        </span>
-                        {pts != null && (
-                          <span className="text-[10px] text-[var(--lime)]">
-                            {pts}p
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-          <tr className="border-t border-white/15">
-            <td className="sticky left-0 bg-[#062416]/95 px-3 py-3 font-medium">
-              Pts
-            </td>
-            <td colSpan={2} />
-            {players.map((p) => {
-              const standing = buildPlayerStanding(
-                p,
-                state.course,
-                state.scores,
-              );
-              return (
-                <td
-                  key={p.id}
-                  className="px-2 py-3 font-semibold tabular-nums text-[var(--lime)]"
-                >
-                  {standing.totalPoints}
-                </td>
-              );
-            })}
-          </tr>
+          {holeRows(outHoles)}
+          {outHoles.length > 0 && (
+            <SubtotalRow
+              label="Out 소계"
+              parSum={outHoles.reduce((s, h) => s + h.par, 0)}
+              players={players}
+              values={players.map((p, i) => ({
+                gross: sumGross(
+                  state,
+                  p.id,
+                  outHoles.map((h) => h.hole),
+                ),
+                points: standings[i]?.outPoints ?? 0,
+              }))}
+            />
+          )}
+          {holeRows(inHoles)}
+          {inHoles.length > 0 && (
+            <SubtotalRow
+              label="In 소계"
+              parSum={inHoles.reduce((s, h) => s + h.par, 0)}
+              players={players}
+              values={players.map((p, i) => ({
+                gross: sumGross(
+                  state,
+                  p.id,
+                  inHoles.map((h) => h.hole),
+                ),
+                points: standings[i]?.inPoints ?? 0,
+              }))}
+            />
+          )}
+          <SubtotalRow
+            label="총계"
+            parSum={course.reduce((s, h) => s + h.par, 0)}
+            players={players}
+            values={players.map((p, i) => ({
+              gross: sumGross(
+                state,
+                p.id,
+                course.map((h) => h.hole),
+              ),
+              points: standings[i]?.totalPoints ?? 0,
+            }))}
+          />
         </tbody>
       </table>
     </div>

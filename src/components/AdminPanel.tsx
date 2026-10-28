@@ -78,6 +78,11 @@ export default function AdminPanel({ slug }: { slug: string }) {
     await refresh();
   }
 
+  async function logout() {
+    await fetch("/api/admin/logout", { method: "POST" });
+    await refresh();
+  }
+
   async function applyCatalogCourse() {
     if (!selectedCourseId) return;
     setBusy(true);
@@ -191,6 +196,9 @@ export default function AdminPanel({ slug }: { slug: string }) {
               {g}조
             </Link>
           ))}
+          <button type="button" className="btn-ghost" onClick={() => void logout()}>
+            로그아웃
+          </button>
         </>
       }
     >

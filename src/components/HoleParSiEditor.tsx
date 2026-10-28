@@ -9,6 +9,7 @@ function Stepper({
   onChange,
   disabled,
   invalid,
+  tone,
 }: {
   value: number;
   min: number;
@@ -16,11 +17,12 @@ function Stepper({
   onChange: (n: number) => void;
   disabled?: boolean;
   invalid?: boolean;
+  tone?: string;
 }) {
   return (
     <div className="inline-flex items-center gap-1">
       <input
-        className={`field ${invalid ? "field-invalid" : ""}`}
+        className={`field ${invalid ? "field-invalid" : ""} ${tone || ""}`}
         inputMode="numeric"
         value={value}
         disabled={disabled}
@@ -77,6 +79,12 @@ export function hasDuplicateStrokeIndexes(holes: CourseHole[]): boolean {
 function parClass(par: number): string {
   if (par === 3) return "par-3";
   if (par === 5) return "par-5";
+  return "";
+}
+
+function parFieldTone(par: number): string {
+  if (par === 3) return "field-par-3";
+  if (par === 5) return "field-par-5";
   return "";
 }
 
@@ -169,6 +177,7 @@ export default function HoleParSiEditor({
                         value={h.par}
                         min={3}
                         max={6}
+                        tone={parFieldTone(h.par)}
                         onChange={(n) => patch(idx, "par", n)}
                       />
                     )}

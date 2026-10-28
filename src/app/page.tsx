@@ -57,6 +57,13 @@ export default function HomePage() {
     setManage("courses");
   }
 
+  async function logout() {
+    await fetch("/api/admin/logout", { method: "POST" });
+    setManage("none");
+    setPin("");
+    await load();
+  }
+
   async function createTournament() {
     setBusy(true);
     setError(null);
@@ -223,6 +230,13 @@ export default function HomePage() {
                   }
                 >
                   회원 명단
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => void logout()}
+                >
+                  로그아웃
                 </button>
               </div>
               <p className="text-xs text-[var(--foam)]/40">
