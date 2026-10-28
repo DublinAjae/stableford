@@ -11,10 +11,17 @@ export async function POST(req: Request) {
   if (!(await isGlobalAdmin())) {
     return NextResponse.json({ error: "admin 권한이 필요합니다." }, { status: 401 });
   }
-  const body = (await req.json()) as UpsertGolfCourseInput;
-  if (!body.name?.trim()) {
-    return NextResponse.json({ error: "코스 이름이 필요합니다." }, { status: 400 });
+  try {
+    const body = (await req.json()) as UpsertGolfCourseInput;
+    if (!body.name?.trim()) {
+      return NextResponse.json({ error: "코스 이름이 필요합니다." }, { status: 400 });
+    }
+    const course = await getStore().upsertCourse(body);
+    return NextResponse.json({ course });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "코스 저장 실패" },
+      { status: 500 },
+    );
   }
-  const course = await getStore().upsertCourse(body);
-  return NextResponse.json({ course });
 }
