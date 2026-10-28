@@ -92,7 +92,7 @@ export default function GroupPanel({
         </p>
       ) : (
         <div className="space-y-6">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="hidden gap-3 sm:grid sm:grid-cols-2 lg:grid-cols-4">
             {players.map((p) => {
               const s = buildPlayerStanding(p, state.course, state.scores);
               return (
@@ -100,11 +100,11 @@ export default function GroupPanel({
                   key={p.id}
                   className="rounded-sm border border-white/10 bg-black/25 p-4"
                 >
-                  <p className="font-medium text-[var(--foam)]">{p.name}</p>
+                  <p className="player-name">{p.name}</p>
                   <p className="text-xs text-[var(--foam)]/45">
                     HCP {p.courseHandicap} · {s.holesPlayed}홀
                   </p>
-                  <p className="mt-2 font-display text-3xl text-[var(--lime)] tabular-nums">
+                  <p className="mt-2 font-display text-3xl tabular-nums text-[var(--lime)]">
                     {s.totalPoints}
                   </p>
                 </div>

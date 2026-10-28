@@ -100,8 +100,8 @@ export default function HomePage() {
       <div className="pointer-events-none absolute inset-0 bg-fairway" aria-hidden />
       <div className="pointer-events-none absolute inset-0 bg-mist" aria-hidden />
 
-      <section className="relative z-10 mx-auto w-full max-w-5xl px-5 py-16 sm:px-8">
-        <p className="animate-rise font-display text-[clamp(3rem,11vw,6.5rem)] leading-[0.9] tracking-[-0.03em] text-[var(--foam)]">
+      <section className="relative z-10 mx-auto w-full max-w-5xl px-4 py-12 sm:px-8 sm:py-16">
+        <p className="animate-rise font-display text-[clamp(2.6rem,14vw,6.5rem)] leading-[0.9] tracking-[-0.03em] text-[var(--foam)]">
           STABLEFORD
         </p>
         <p className="animate-rise-delay mt-5 max-w-lg text-base leading-relaxed text-[var(--foam)]/75 sm:text-lg">

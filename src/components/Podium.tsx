@@ -39,17 +39,17 @@ export default function Podium({ standings }: { standings: PlayerStanding[] }) {
             <ul className="mt-2 space-y-2">
               {rows.map((row) => (
                 <li key={row.player.id}>
-                  <p className="font-display text-2xl leading-tight text-[var(--foam)]">
+                  <p className="font-display text-xl leading-tight text-[var(--foam)] sm:text-2xl">
                     {row.player.name}
                   </p>
-                  <p className="text-sm font-semibold text-[var(--foam)]/80">
+                  <p className="text-xs font-semibold text-[var(--foam)]/80 sm:text-sm">
                     {row.player.groupCode}조 · HCP {row.player.courseHandicap}
                   </p>
                 </li>
               ))}
             </ul>
             <p
-              className={`mt-4 font-display text-5xl tabular-nums ${
+              className={`mt-4 font-display text-4xl tabular-nums sm:text-5xl ${
                 rank === 1 ? "text-[var(--lime)]" : "text-[var(--foam)]"
               }`}
             >
