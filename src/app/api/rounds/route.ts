@@ -3,6 +3,8 @@ import { isGlobalAdmin } from "@/lib/auth";
 import { tournamentSlug } from "@/lib/courses";
 import { getStore, storeKind } from "@/lib/store";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const store = getStore();
   const [rounds, courses, members] = await Promise.all([
@@ -10,13 +12,16 @@ export async function GET() {
     store.listCourses(),
     store.listMembers(),
   ]);
-  return NextResponse.json({
-    rounds,
-    courses,
-    members,
-    store: storeKind(),
-    admin: await isGlobalAdmin(),
-  });
+  return NextResponse.json(
+    {
+      rounds,
+      courses,
+      members,
+      store: storeKind(),
+      admin: await isGlobalAdmin(),
+    },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 export async function POST(req: Request) {

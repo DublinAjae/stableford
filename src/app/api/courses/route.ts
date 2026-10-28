@@ -2,9 +2,14 @@ import { NextResponse } from "next/server";
 import { isGlobalAdmin } from "@/lib/auth";
 import { getStore, type UpsertGolfCourseInput } from "@/lib/store";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const courses = await getStore().listCourses();
-  return NextResponse.json({ courses, admin: await isGlobalAdmin() });
+  return NextResponse.json(
+    { courses, admin: await isGlobalAdmin() },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 export async function POST(req: Request) {
