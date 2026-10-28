@@ -34,8 +34,8 @@ export default function HomePage() {
     setCourses(body.courses || []);
     setMembers(body.members || []);
     setAdmin(Boolean(body.admin));
-    if (!courseId && body.courses?.[0]) setCourseId(body.courses[0].id);
-  }, [courseId]);
+    setCourseId((prev) => prev || body.courses?.[0]?.id || "");
+  }, []);
 
   useEffect(() => {
     void load();

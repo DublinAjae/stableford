@@ -19,6 +19,11 @@ import type {
   UpsertPlayerInput,
 } from "./types";
 
+export type CatalogShape = {
+  courses: GolfCourse[];
+  members: Member[];
+};
+
 export type DbShape = {
   version: 3;
   courses: GolfCourse[];
@@ -30,20 +35,40 @@ export function emptyDb(): DbShape {
   return { version: 3, courses: [], members: [], rounds: [] };
 }
 
+export function emptyCatalog(): CatalogShape {
+  return { courses: [], members: [] };
+}
+
 function migrate(raw: unknown): DbShape {
   if (!raw || typeof raw !== "object") return emptyDb();
   const obj = raw as {
-    version?: number;
     courses?: GolfCourse[];
     members?: Member[];
     rounds?: RoundState[];
   };
-  const courses = Array.isArray(obj.courses) ? obj.courses : [];
-  const members = Array.isArray(obj.members) ? obj.members : [];
-  const rounds = (Array.isArray(obj.rounds) ? obj.rounds : []).map((r) =>
-    normalizeRound(r),
-  );
-  return { version: 3, courses, members, rounds };
+  return {
+    version: 3,
+    courses: Array.isArray(obj.courses) ? obj.courses : [],
+    members: Array.isArray(obj.members) ? obj.members : [],
+    rounds: (Array.isArray(obj.rounds) ? obj.rounds : []).map(normalizeRound),
+  };
+}
+
+function migrateCatalog(raw: unknown): CatalogShape {
+  if (!raw || typeof raw !== "object") return emptyCatalog();
+  const obj = raw as { courses?: GolfCourse[]; members?: Member[] };
+  return {
+    courses: Array.isArray(obj.courses) ? obj.courses : [],
+    members: Array.isArray(obj.members) ? obj.members : [],
+  };
+}
+
+function migrateRounds(raw: unknown): RoundState[] {
+  if (Array.isArray(raw)) return raw.map(normalizeRound);
+  if (raw && typeof raw === "object" && Array.isArray((raw as DbShape).rounds)) {
+    return ((raw as DbShape).rounds || []).map(normalizeRound);
+  }
+  return [];
 }
 
 function normalizeRound(r: RoundState): RoundState {
@@ -60,7 +85,10 @@ function normalizeRound(r: RoundState): RoundState {
       id: meta.id,
       slug: meta.slug,
       name: meta.name,
-      date: meta.date || meta.updatedAt?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+      date:
+        meta.date ||
+        meta.updatedAt?.slice(0, 10) ||
+        new Date().toISOString().slice(0, 10),
       courseId: meta.courseId ?? null,
       courseName: meta.courseName || "Course",
       teeColor: meta.teeColor || "white",
@@ -94,35 +122,82 @@ function listItem(r: RoundState): RoundListItem {
   };
 }
 
-export function createJsonStore(io: {
-  read: () => Promise<unknown>;
-  write: (db: DbShape) => Promise<void>;
-}): RoundStore {
-  async function load(): Promise<DbShape> {
-    return migrate(await io.read());
+export type StoreIO = {
+  /** Full legacy read (used once for migration). */
+  readAll?: () => Promise<unknown>;
+  readCatalog: () => Promise<unknown>;
+  writeCatalog: (catalog: CatalogShape) => Promise<void>;
+  readRounds: () => Promise<unknown>;
+  writeRounds: (rounds: RoundState[]) => Promise<void>;
+};
+
+export function createJsonStore(io: StoreIO): RoundStore {
+  let migrated = false;
+
+  async function ensureMigrated(): Promise<void> {
+    if (migrated || !io.readAll) {
+      migrated = true;
+      return;
+    }
+    migrated = true;
+    try {
+      const catalog = migrateCatalog(await io.readCatalog());
+      const rounds = migrateRounds(await io.readRounds());
+      if (
+        catalog.courses.length ||
+        catalog.members.length ||
+        rounds.length
+      ) {
+        return;
+      }
+
+      const legacy = migrate(await io.readAll());
+      if (
+        legacy.courses.length ||
+        legacy.members.length ||
+        legacy.rounds.length
+      ) {
+        await io.writeCatalog({
+          courses: legacy.courses,
+          members: legacy.members,
+        });
+        await io.writeRounds(legacy.rounds);
+      }
+    } catch {
+      // ignore migration errors; fresh stores start empty
+    }
   }
 
-  async function save(db: DbShape): Promise<void> {
-    await io.write(db);
+  async function loadCatalog(): Promise<CatalogShape> {
+    await ensureMigrated();
+    return migrateCatalog(await io.readCatalog());
+  }
+
+  async function loadRounds(): Promise<RoundState[]> {
+    await ensureMigrated();
+    return migrateRounds(await io.readRounds());
   }
 
   return {
     async listRounds() {
-      const db = await load();
-      return db.rounds.map(listItem).sort((a, b) => {
+      const rounds = await loadRounds();
+      return rounds.map(listItem).sort((a, b) => {
         if (b.date !== a.date) return b.date.localeCompare(a.date);
         return b.updatedAt.localeCompare(a.updatedAt);
       });
     },
 
     async getRound(slug) {
-      const db = await load();
-      return db.rounds.find((r) => r.round.slug === slug) ?? null;
+      const rounds = await loadRounds();
+      return rounds.find((r) => r.round.slug === slug) ?? null;
     },
 
     async createRound(input: CreateRoundInput) {
-      const db = await load();
-      if (db.rounds.some((r) => r.round.slug === input.slug)) {
+      const [catalog, rounds] = await Promise.all([
+        loadCatalog(),
+        loadRounds(),
+      ]);
+      if (rounds.some((r) => r.round.slug === input.slug)) {
         throw new Error("슬러그가 이미 존재합니다.");
       }
 
@@ -133,12 +208,12 @@ export function createJsonStore(io: {
       let courseId = input.courseId ?? null;
 
       if (courseId) {
-        const catalog = db.courses.find((c) => c.id === courseId);
-        if (!catalog) throw new Error("선택한 코스를 찾을 수 없습니다.");
-        holes = catalog.holes;
-        courseName = catalog.name;
-        teeColor = catalog.teeColor;
-        lengthMeters = catalog.lengthMeters;
+        const found = catalog.courses.find((c) => c.id === courseId);
+        if (!found) throw new Error("선택한 코스를 찾을 수 없습니다.");
+        holes = found.holes;
+        courseName = found.name;
+        teeColor = found.teeColor;
+        lengthMeters = found.lengthMeters;
       }
 
       const now = new Date().toISOString();
@@ -158,16 +233,15 @@ export function createJsonStore(io: {
         players: [],
         scores: [],
       };
-      db.rounds.push(state);
-      await save(db);
+      await io.writeRounds([...rounds, state]);
       return state;
     },
 
     async updateRoundMeta(slug, patch) {
-      const db = await load();
-      const idx = db.rounds.findIndex((r) => r.round.slug === slug);
+      const rounds = await loadRounds();
+      const idx = rounds.findIndex((r) => r.round.slug === slug);
       if (idx < 0) return null;
-      const prev = db.rounds[idx];
+      const prev = rounds[idx];
       const next = touch({
         ...prev,
         round: {
@@ -184,51 +258,60 @@ export function createJsonStore(io: {
               : prev.round.lengthMeters,
         },
       });
-      db.rounds[idx] = next;
-      await save(db);
+      const copy = [...rounds];
+      copy[idx] = next;
+      await io.writeRounds(copy);
       return next;
     },
 
     async setCourse(slug, course) {
-      const db = await load();
-      const idx = db.rounds.findIndex((r) => r.round.slug === slug);
+      const rounds = await loadRounds();
+      const idx = rounds.findIndex((r) => r.round.slug === slug);
       if (idx < 0) return null;
-      const next = touch({ ...db.rounds[idx], course });
-      db.rounds[idx] = next;
-      await save(db);
+      const next = touch({ ...rounds[idx], course });
+      const copy = [...rounds];
+      copy[idx] = next;
+      await io.writeRounds(copy);
       return next;
     },
 
     async applyCatalogCourse(slug, courseId) {
-      const db = await load();
-      const idx = db.rounds.findIndex((r) => r.round.slug === slug);
+      const [catalog, rounds] = await Promise.all([
+        loadCatalog(),
+        loadRounds(),
+      ]);
+      const idx = rounds.findIndex((r) => r.round.slug === slug);
       if (idx < 0) return null;
-      const catalog = db.courses.find((c) => c.id === courseId);
-      if (!catalog) throw new Error("코스를 찾을 수 없습니다.");
-      const prev = db.rounds[idx];
+      const found = catalog.courses.find((c) => c.id === courseId);
+      if (!found) throw new Error("코스를 찾을 수 없습니다.");
+      const prev = rounds[idx];
       const next = touch({
         ...prev,
-        course: catalog.holes,
+        course: found.holes,
         round: {
           ...prev.round,
-          courseId: catalog.id,
-          courseName: catalog.name,
-          teeColor: catalog.teeColor,
-          lengthMeters: catalog.lengthMeters,
+          courseId: found.id,
+          courseName: found.name,
+          teeColor: found.teeColor,
+          lengthMeters: found.lengthMeters,
         },
       });
-      db.rounds[idx] = next;
-      await save(db);
+      const copy = [...rounds];
+      copy[idx] = next;
+      await io.writeRounds(copy);
       return next;
     },
 
     async setPlayers(slug, playersInput: UpsertPlayerInput[]) {
-      const db = await load();
-      const idx = db.rounds.findIndex((r) => r.round.slug === slug);
+      const rounds = await loadRounds();
+      const idx = rounds.findIndex((r) => r.round.slug === slug);
       if (idx < 0) return null;
-      const prev = db.rounds[idx];
+      const prev = rounds[idx];
       const players: Player[] = playersInput.map((p, i) => ({
-        id: p.id && prev.players.some((x) => x.id === p.id) ? p.id : randomUUID(),
+        id:
+          p.id && prev.players.some((x) => x.id === p.id)
+            ? p.id
+            : randomUUID(),
         memberId: p.memberId ?? null,
         name: p.name.trim() || `Player ${i + 1}`,
         courseHandicap: p.courseHandicap,
@@ -257,8 +340,9 @@ export function createJsonStore(io: {
         players,
         scores: [...scoreMap.values()],
       });
-      db.rounds[idx] = next;
-      await save(db);
+      const copy = [...rounds];
+      copy[idx] = next;
+      await io.writeRounds(copy);
       return next;
     },
 
@@ -267,10 +351,10 @@ export function createJsonStore(io: {
     },
 
     async upsertScores(slug, incoming) {
-      const db = await load();
-      const idx = db.rounds.findIndex((r) => r.round.slug === slug);
+      const rounds = await loadRounds();
+      const idx = rounds.findIndex((r) => r.round.slug === slug);
       if (idx < 0) return null;
-      const prev = db.rounds[idx];
+      const prev = rounds[idx];
       const map = new Map<string, Score>(
         prev.scores.map((s) => [`${s.playerId}:${s.hole}`, s]),
       );
@@ -282,32 +366,31 @@ export function createJsonStore(io: {
         });
       }
       const next = touch({ ...prev, scores: [...map.values()] });
-      db.rounds[idx] = next;
-      await save(db);
+      const copy = [...rounds];
+      copy[idx] = next;
+      await io.writeRounds(copy);
       return next;
     },
 
     async listCourses() {
-      const db = await load();
-      return db.courses
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name));
+      const catalog = await loadCatalog();
+      return catalog.courses.slice().sort((a, b) => a.name.localeCompare(b.name));
     },
 
     async getCourse(id) {
-      const db = await load();
-      return db.courses.find((c) => c.id === id) ?? null;
+      const catalog = await loadCatalog();
+      return catalog.courses.find((c) => c.id === id) ?? null;
     },
 
     async upsertCourse(input: UpsertGolfCourseInput) {
-      const db = await load();
+      const catalog = await loadCatalog();
       const now = new Date().toISOString();
       const holes = normalizeHoles(input.holes, input.holeCount);
       if (input.id) {
-        const idx = db.courses.findIndex((c) => c.id === input.id);
+        const idx = catalog.courses.findIndex((c) => c.id === input.id);
         if (idx >= 0) {
           const next: GolfCourse = {
-            ...db.courses[idx],
+            ...catalog.courses[idx],
             name: input.name.trim(),
             lengthMeters: input.lengthMeters,
             teeColor: input.teeColor,
@@ -315,8 +398,9 @@ export function createJsonStore(io: {
             holes,
             updatedAt: now,
           };
-          db.courses[idx] = next;
-          await save(db);
+          const courses = [...catalog.courses];
+          courses[idx] = next;
+          await io.writeCatalog({ ...catalog, courses });
           return next;
         }
       }
@@ -330,43 +414,48 @@ export function createJsonStore(io: {
         createdAt: now,
         updatedAt: now,
       };
-      db.courses.push(created);
-      await save(db);
+      await io.writeCatalog({
+        ...catalog,
+        courses: [...catalog.courses, created],
+      });
       return created;
     },
 
     async deleteCourse(id) {
-      const db = await load();
-      db.courses = db.courses.filter((c) => c.id !== id);
-      await save(db);
+      const catalog = await loadCatalog();
+      await io.writeCatalog({
+        ...catalog,
+        courses: catalog.courses.filter((c) => c.id !== id),
+      });
     },
 
     async listMembers() {
-      const db = await load();
-      return db.members.slice().sort((a, b) => a.name.localeCompare(b.name));
+      const catalog = await loadCatalog();
+      return catalog.members.slice().sort((a, b) => a.name.localeCompare(b.name));
     },
 
     async getMember(id) {
-      const db = await load();
-      return db.members.find((m) => m.id === id) ?? null;
+      const catalog = await loadCatalog();
+      return catalog.members.find((m) => m.id === id) ?? null;
     },
 
     async upsertMember(input: UpsertMemberInput) {
-      const db = await load();
+      const catalog = await loadCatalog();
       const now = new Date().toISOString();
       const name = input.name.trim() || "Untitled";
       const handicap = Number.isFinite(input.handicap) ? input.handicap : 18;
       if (input.id) {
-        const idx = db.members.findIndex((m) => m.id === input.id);
+        const idx = catalog.members.findIndex((m) => m.id === input.id);
         if (idx >= 0) {
           const next: Member = {
-            ...db.members[idx],
+            ...catalog.members[idx],
             name,
             handicap,
             updatedAt: now,
           };
-          db.members[idx] = next;
-          await save(db);
+          const members = [...catalog.members];
+          members[idx] = next;
+          await io.writeCatalog({ ...catalog, members });
           return next;
         }
       }
@@ -377,15 +466,19 @@ export function createJsonStore(io: {
         createdAt: now,
         updatedAt: now,
       };
-      db.members.push(created);
-      await save(db);
+      await io.writeCatalog({
+        ...catalog,
+        members: [...catalog.members, created],
+      });
       return created;
     },
 
     async deleteMember(id) {
-      const db = await load();
-      db.members = db.members.filter((m) => m.id !== id);
-      await save(db);
+      const catalog = await loadCatalog();
+      await io.writeCatalog({
+        ...catalog,
+        members: catalog.members.filter((m) => m.id !== id),
+      });
     },
   };
 }

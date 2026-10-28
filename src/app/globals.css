@@ -134,3 +134,22 @@ input[type="number"]::-webkit-outer-spin-button {
   border-color: rgba(238, 246, 234, 0.45);
   background: rgba(255, 255, 255, 0.04);
 }
+
+.stepper-btn {
+  display: inline-flex;
+  height: 1.1rem;
+  width: 1.35rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.15rem;
+  border: 1px solid rgba(238, 246, 234, 0.2);
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 0.55rem;
+  line-height: 1;
+  color: var(--foam);
+}
+
+.stepper-btn:hover {
+  border-color: var(--lime);
+  color: var(--lime);
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import HoleParSiEditor, { parTotals } from "@/components/HoleParSiEditor";
 import { emptyHoles, TEE_COLOR_LABELS } from "@/lib/courses";
 import { recognizeScorecard } from "@/lib/ocr";
 import type { CourseHole, GolfCourse, TeeColor } from "@/lib/types";
@@ -81,11 +82,14 @@ export default function CourseEditor({
           body: JSON.stringify(payload),
         },
       );
-      const body = (await res.json()) as { error?: string };
+      const body = (await res.json()) as {
+        course?: GolfCourse;
+        error?: string;
+      };
       if (!res.ok) throw new Error(body.error || "저장 실패");
+      if (body.course) setDraft(toDraft(body.course));
       await onChanged();
       setNote("코스 저장됨");
-      if (!draft.id) reset();
     } catch (e) {
       setError(e instanceof Error ? e.message : "오류");
     } finally {
@@ -134,7 +138,9 @@ export default function CourseEditor({
     <div className="grid gap-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)]">
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <p className="text-sm text-[var(--foam)]/55">저장된 코스</p>
+          <p className="text-sm text-[var(--foam)]/55">
+            저장된 코스 ({courses.length})
+          </p>
           <button type="button" className="btn-ghost" onClick={reset}>
             새 코스
           </button>
@@ -143,32 +149,39 @@ export default function CourseEditor({
           <p className="text-sm text-[var(--foam)]/40">아직 코스가 없습니다.</p>
         ) : (
           <ul className="space-y-2">
-            {courses.map((c) => (
-              <li
-                key={c.id}
-                className="flex items-center justify-between gap-2 rounded-sm border border-white/10 bg-black/25 px-3 py-2"
-              >
-                <button
-                  type="button"
-                  className="text-left"
-                  onClick={() => edit(c)}
+            {courses.map((c) => {
+              const totals = parTotals(c.holes);
+              return (
+                <li
+                  key={c.id}
+                  className={`flex items-center justify-between gap-2 rounded-sm border px-3 py-2 ${
+                    draft.id === c.id
+                      ? "border-[var(--lime)]/50 bg-[var(--lime)]/10"
+                      : "border-white/10 bg-black/25"
+                  }`}
                 >
-                  <p className="font-medium text-[var(--foam)]">{c.name}</p>
-                  <p className="text-xs text-[var(--foam)]/45">
-                    {TEE_COLOR_LABELS[c.teeColor]}
-                    {c.lengthMeters != null ? ` · ${c.lengthMeters}m` : ""} ·{" "}
-                    {c.holeCount}홀
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  className="text-xs text-[var(--foam)]/40 hover:text-red-200"
-                  onClick={() => void remove(c.id)}
-                >
-                  삭제
-                </button>
-              </li>
-            ))}
+                  <button
+                    type="button"
+                    className="text-left"
+                    onClick={() => edit(c)}
+                  >
+                    <p className="font-medium text-[var(--foam)]">{c.name}</p>
+                    <p className="text-xs text-[var(--foam)]/45">
+                      {TEE_COLOR_LABELS[c.teeColor]}
+                      {c.lengthMeters != null ? ` · ${c.lengthMeters}m` : ""} ·{" "}
+                      {c.holeCount}홀 · Par {totals.total}
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    className="text-xs text-[var(--foam)]/40 hover:text-red-200"
+                    onClick={() => void remove(c.id)}
+                  >
+                    삭제
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -267,65 +280,10 @@ export default function CourseEditor({
         {note && <p className="text-sm text-[var(--foam)]/55">{note}</p>}
         {error && <p className="text-sm text-red-200">{error}</p>}
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[22rem] text-sm">
-            <thead>
-              <tr className="border-b border-white/10 text-[var(--foam)]/45">
-                <th className="px-2 py-2 text-left">Hole</th>
-                <th className="px-2 py-2 text-left">Par</th>
-                <th className="px-2 py-2 text-left">SI</th>
-              </tr>
-            </thead>
-            <tbody>
-              {draft.holes.map((h, idx) => (
-                <tr key={h.hole} className="border-b border-white/5">
-                  <td className="px-2 py-1.5">{h.hole}</td>
-                  <td className="px-2 py-1.5">
-                    <input
-                      className="field"
-                      value={h.par}
-                      onChange={(e) => {
-                        const n = Number(e.target.value);
-                        if (!Number.isFinite(n)) return;
-                        const holes = draft.holes.map((x, i) =>
-                          i === idx
-                            ? {
-                                ...x,
-                                par: Math.min(6, Math.max(3, Math.round(n))),
-                              }
-                            : x,
-                        );
-                        setDraft({ ...draft, holes });
-                      }}
-                    />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <input
-                      className="field"
-                      value={h.strokeIndex}
-                      onChange={(e) => {
-                        const n = Number(e.target.value);
-                        if (!Number.isFinite(n)) return;
-                        const holes = draft.holes.map((x, i) =>
-                          i === idx
-                            ? {
-                                ...x,
-                                strokeIndex: Math.min(
-                                  18,
-                                  Math.max(1, Math.round(n)),
-                                ),
-                              }
-                            : x,
-                        );
-                        setDraft({ ...draft, holes });
-                      }}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <HoleParSiEditor
+          holes={draft.holes}
+          onChange={(holes) => setDraft({ ...draft, holes })}
+        />
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import Podium from "@/components/Podium";
 import StandingsTable from "@/components/StandingsTable";
 import ScoreGrid from "@/components/ScoreGrid";
 import CourseEditor from "@/components/CourseEditor";
+import HoleParSiEditor from "@/components/HoleParSiEditor";
 import MemberEditor from "@/components/MemberEditor";
 import { useRoundState } from "@/hooks/useRoundState";
 import { TEE_COLOR_LABELS } from "@/lib/courses";
@@ -329,64 +330,11 @@ export default function AdminPanel({ slug }: { slug: string }) {
           {ocrNote && (
             <p className="text-sm text-[var(--foam)]/55">{ocrNote}</p>
           )}
-          <div className="overflow-x-auto rounded-sm border border-white/10 bg-black/20">
-            <table className="w-full min-w-[28rem] text-sm">
-              <thead>
-                <tr className="border-b border-white/10 text-[var(--foam)]/45">
-                  <th className="px-3 py-3 text-left font-medium">Hole</th>
-                  <th className="px-3 py-3 text-left font-medium">Par</th>
-                  <th className="px-3 py-3 text-left font-medium">SI</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.course.map((h, idx) => (
-                  <tr key={h.hole} className="border-b border-white/5">
-                    <td className="px-3 py-2">{h.hole}</td>
-                    <td className="px-2 py-1.5">
-                      <input
-                        className="field"
-                        value={h.par}
-                        onChange={(e) => {
-                          const n = Number(e.target.value);
-                          if (!Number.isFinite(n)) return;
-                          const course = state.course.map((c, i) =>
-                            i === idx
-                              ? {
-                                  ...c,
-                                  par: Math.min(6, Math.max(3, Math.round(n))),
-                                }
-                              : c,
-                          );
-                          setState({ ...state, course });
-                        }}
-                      />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <input
-                        className="field"
-                        value={h.strokeIndex}
-                        onChange={(e) => {
-                          const n = Number(e.target.value);
-                          if (!Number.isFinite(n)) return;
-                          const course = state.course.map((c, i) =>
-                            i === idx
-                              ? {
-                                  ...c,
-                                  strokeIndex: Math.min(
-                                    18,
-                                    Math.max(1, Math.round(n)),
-                                  ),
-                                }
-                              : c,
-                          );
-                          setState({ ...state, course });
-                        }}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="rounded-sm border border-white/10 bg-black/20 p-3">
+            <HoleParSiEditor
+              holes={state.course}
+              onChange={(course) => setState({ ...state, course })}
+            />
           </div>
         </div>
       )}
