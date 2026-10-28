@@ -28,8 +28,10 @@ export default function GroupPanel({
     [state, groupCode],
   );
 
+  const closed = Boolean(state?.round.closed);
+
   async function saveScore(playerId: string, hole: number, gross: number | null) {
-    if (!state) return;
+    if (!state || state.round.closed) return;
     const nextScores = state.scores.filter(
       (s) => !(s.playerId === playerId && s.hole === hole),
     );
@@ -68,13 +70,22 @@ export default function GroupPanel({
   return (
     <Shell
       title={`${state.round.name} · ${groupCode}조`}
-      subtitle="스코어만 입력 가능 · Par/HCP/조는 admin만 변경"
+      subtitle={
+        closed
+          ? "대회 종료 · 타수 수정 불가"
+          : "스코어만 입력 가능 · Par/HCP/조는 admin만 변경"
+      }
       actions={
         <Link className="btn-ghost" href={`/r/${slug}`}>
           전체 순위
         </Link>
       }
     >
+      {closed && (
+        <p className="mb-4 rounded-sm border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+          대회가 종료되어 타수를 수정할 수 없습니다.
+        </p>
+      )}
       {players.length === 0 ? (
         <p className="text-[var(--foam)]/55">
           {groupCode}조 플레이어가 없습니다. Admin에서 조 편성을 확인해 주세요.
@@ -103,7 +114,7 @@ export default function GroupPanel({
           <ScoreGrid
             state={state}
             players={players}
-            editable
+            editable={!closed}
             onChangeGross={(playerId, hole, gross) =>
               void saveScore(playerId, hole, gross)
             }

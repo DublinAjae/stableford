@@ -13,6 +13,13 @@ export async function PUT(req: Request, ctx: Ctx) {
     return NextResponse.json({ error: "라운드를 찾을 수 없습니다." }, { status: 404 });
   }
 
+  if (current.round.closed) {
+    return NextResponse.json(
+      { error: "대회가 종료되어 타수를 수정할 수 없습니다." },
+      { status: 403 },
+    );
+  }
+
   const body = (await req.json()) as {
     scores?: Score[];
     groupCode?: string;

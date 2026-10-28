@@ -92,6 +92,7 @@ function normalizeRound(r: RoundState): RoundState {
     courseName?: string;
     teeColor?: TeeColor;
     lengthMeters?: number | null;
+    closed?: boolean;
   };
   return {
     ...r,
@@ -107,6 +108,7 @@ function normalizeRound(r: RoundState): RoundState {
       courseName: meta.courseName || "Course",
       teeColor: meta.teeColor || "white",
       lengthMeters: meta.lengthMeters ?? null,
+      closed: Boolean(meta.closed),
       updatedAt: meta.updatedAt,
     },
     course: r.course?.length ? r.course : defaultCourse(),
@@ -291,6 +293,7 @@ export function createJsonStore(io: StoreIO): RoundStore {
           courseName,
           teeColor,
           lengthMeters,
+          closed: false,
           updatedAt: now,
         },
         course: holes,
@@ -327,6 +330,8 @@ export function createJsonStore(io: StoreIO): RoundStore {
               patch.lengthMeters !== undefined
                 ? patch.lengthMeters
                 : prev.round.lengthMeters,
+            closed:
+              patch.closed !== undefined ? patch.closed : prev.round.closed,
           },
         });
         const copy = [...rounds];

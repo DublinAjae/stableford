@@ -57,6 +57,7 @@ export type RoundStore = {
       courseName: string;
       teeColor: TeeColor;
       lengthMeters: number | null;
+      closed: boolean;
     }>,
   ): Promise<RoundState | null>;
   setCourse(slug: string, course: CourseHole[]): Promise<RoundState | null>;

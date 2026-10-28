@@ -104,22 +104,22 @@ function SubtotalRow({
 }) {
   return (
     <tr className="score-subtotal border-y border-white/20">
-      <td className="sticky left-0 bg-[#0a2f1c] px-3 py-2.5 font-semibold">
+      <td className="sticky left-0 bg-[#0a2f1c] px-3 py-3 text-base font-bold tracking-tight sm:text-lg">
         {label}
       </td>
-      <td className="px-2 py-2.5 font-semibold tabular-nums text-[var(--lime)]">
+      <td className="px-2 py-3 text-base font-bold tabular-nums text-[var(--lime)] sm:text-lg">
         {parSum}
       </td>
-      <td className="px-2 py-2.5 text-[var(--foam)]/35">—</td>
+      <td className="px-2 py-3 text-[var(--foam)]/35">—</td>
       {players.map((p, i) => {
         const v = values[i];
         return (
-          <td key={p.id} className="px-2 py-2.5">
-            <div className="flex items-baseline gap-1">
-              <span className="font-semibold tabular-nums text-[var(--foam)]">
+          <td key={p.id} className="px-2 py-3">
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-base font-bold tabular-nums text-[var(--foam)] sm:text-lg">
                 {v?.gross ?? "—"}
               </span>
-              <span className="text-[10px] font-semibold text-[var(--lime)]">
+              <span className="text-xs font-bold text-[var(--lime)] sm:text-sm">
                 {v?.points ?? 0}p
               </span>
             </div>

@@ -105,6 +105,8 @@ export type RoundMeta = {
   courseName: string;
   teeColor: TeeColor;
   lengthMeters: number | null;
+  /** When true, score edits are locked. */
+  closed: boolean;
   updatedAt: string;
 };
 

@@ -39,14 +39,17 @@ export default function PublicBoard({ slug }: { slug: string }) {
   return (
     <Shell
       title={state.round.name}
-      subtitle={`${state.round.date} · ${state.round.courseName} · ${TEE_COLOR_LABELS[state.round.teeColor]} · 실시간 순위`}
+      subtitle={`${state.round.date} · ${state.round.courseName} · ${TEE_COLOR_LABELS[state.round.teeColor]} · ${
+        state.round.closed ? "대회 종료" : "실시간 순위"
+      }`}
       actions={
         <>
-          {groups.map((g) => (
-            <Link key={g} className="btn-ghost" href={`/r/${slug}/g/${g}`}>
-              {g}조 입력
-            </Link>
-          ))}
+          {!state.round.closed &&
+            groups.map((g) => (
+              <Link key={g} className="btn-ghost" href={`/r/${slug}/g/${g}`}>
+                {g}조 입력
+              </Link>
+            ))}
           <Link className="btn-solid" href={`/r/${slug}/admin`}>
             Admin
           </Link>

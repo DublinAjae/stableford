@@ -34,6 +34,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     courseName?: string;
     teeColor?: TeeColor;
     lengthMeters?: number | null;
+    closed?: boolean;
   };
   const store = getStore();
 

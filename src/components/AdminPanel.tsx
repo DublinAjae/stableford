@@ -119,7 +119,7 @@ export default function AdminPanel({ slug }: { slug: string }) {
   }
 
   async function saveScore(playerId: string, hole: number, gross: number | null) {
-    if (!state) return;
+    if (!state || state.round.closed) return;
     const nextScores = state.scores.filter(
       (s) => !(s.playerId === playerId && s.hole === hole),
     );
@@ -131,8 +131,25 @@ export default function AdminPanel({ slug }: { slug: string }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scores: [{ playerId, hole, gross }] }),
     });
-    const body = (await res.json()) as { state?: RoundState };
+    const body = (await res.json()) as { state?: RoundState; error?: string };
     if (body.state) applyServerState(body.state);
+    else if (body.error) setOcrNote(body.error);
+  }
+
+  async function setClosed(closed: boolean) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/rounds/${slug}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ closed }),
+      });
+      const body = (await res.json()) as { state?: RoundState; error?: string };
+      if (!res.ok) throw new Error(body.error || "상태 변경 실패");
+      if (body.state) applyServerState(body.state);
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (loading && !state) {
@@ -225,12 +242,33 @@ export default function AdminPanel({ slug }: { slug: string }) {
 
       {tab === "live" && (
         <div className="space-y-8">
+          <label className="flex cursor-pointer items-center gap-3 rounded-sm border border-white/10 bg-black/25 px-4 py-3">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-[var(--lime)]"
+              checked={Boolean(state.round.closed)}
+              disabled={busy}
+              onChange={(e) => void setClosed(e.target.checked)}
+            />
+            <span>
+              <span className="font-semibold text-[var(--foam)]">대회 종료</span>
+              <span className="mt-0.5 block text-sm text-[var(--foam)]/50">
+                체크하면 타수·포인트 입력이 잠깁니다. 해제하면 다시 수정할 수
+                있습니다.
+              </span>
+            </span>
+          </label>
+          {state.round.closed && (
+            <p className="rounded-sm border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+              대회가 종료되어 스코어 수정이 잠겨 있습니다.
+            </p>
+          )}
           <Podium standings={standings} />
           <StandingsTable standings={standings} />
           <ScoreGrid
             state={state}
             players={state.players}
-            editable
+            editable={!state.round.closed}
             onChangeGross={(playerId, hole, gross) =>
               void saveScore(playerId, hole, gross)
             }
