@@ -1,52 +1,103 @@
-import { get, put } from "@vercel/blob";
+import {
+  BlobPreconditionFailedError,
+  get,
+  head,
+  put,
+} from "@vercel/blob";
 import {
   createJsonStore,
   emptyCatalog,
   emptyDb,
   type CatalogShape,
+  type VersionedRead,
 } from "./json-db";
 import type { RoundState } from "@/lib/types";
 
 const LEGACY_PATH = "stableford/rounds.json";
 const CATALOG_PATH = "stableford/catalog.json";
 const ROUNDS_PATH = "stableford/rounds-data.json";
+const MIGRATED_PATH = "stableford/.migrated";
 
-async function readBlob(pathname: string): Promise<unknown | null> {
+async function readBlob(pathname: string): Promise<VersionedRead> {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) return null;
+  if (!token) return { data: null, etag: null };
   try {
     const result = await get(pathname, {
       access: "public",
       token,
       useCache: false,
     });
-    if (!result || result.statusCode !== 200 || !result.stream) return null;
+    if (!result || result.statusCode !== 200 || !result.stream) {
+      return { data: null, etag: null };
+    }
     const text = await new Response(result.stream).text();
-    if (!text) return null;
-    return JSON.parse(text) as unknown;
+    if (!text) return { data: null, etag: result.blob.etag ?? null };
+    return {
+      data: JSON.parse(text) as unknown,
+      etag: result.blob.etag ?? null,
+    };
   } catch {
-    return null;
+    return { data: null, etag: null };
   }
 }
 
-async function writeBlob(pathname: string, data: unknown): Promise<void> {
+async function writeBlob(
+  pathname: string,
+  data: unknown,
+  etag?: string | null,
+): Promise<void> {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) throw new Error("BLOB_READ_WRITE_TOKEN이 없습니다.");
-  await put(pathname, JSON.stringify(data), {
-    access: "public",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    token,
-    contentType: "application/json",
-    cacheControlMaxAge: 0,
-  });
+  try {
+    await put(pathname, JSON.stringify(data), {
+      access: "public",
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      token,
+      contentType: "application/json",
+      cacheControlMaxAge: 60,
+      ...(etag ? { ifMatch: etag } : {}),
+    });
+  } catch (e) {
+    if (e instanceof BlobPreconditionFailedError) throw e;
+    // First create has no etag; overwrite without ifMatch as fallback for missing blob
+    if (etag) throw e;
+    await put(pathname, JSON.stringify(data), {
+      access: "public",
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      token,
+      contentType: "application/json",
+      cacheControlMaxAge: 60,
+    });
+  }
+}
+
+async function exists(pathname: string): Promise<boolean> {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) return false;
+  try {
+    await head(pathname, { token });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export const blobStore = createJsonStore({
-  readAll: async () => (await readBlob(LEGACY_PATH)) ?? emptyDb(),
-  readCatalog: async () => (await readBlob(CATALOG_PATH)) ?? emptyCatalog(),
-  writeCatalog: async (catalog: CatalogShape) =>
-    writeBlob(CATALOG_PATH, catalog),
-  readRounds: async () => (await readBlob(ROUNDS_PATH)) ?? [],
-  writeRounds: async (rounds: RoundState[]) => writeBlob(ROUNDS_PATH, rounds),
+  readAll: async () => (await readBlob(LEGACY_PATH)).data ?? emptyDb(),
+  readCatalog: async () => {
+    const v = await readBlob(CATALOG_PATH);
+    return { data: v.data ?? emptyCatalog(), etag: v.etag };
+  },
+  writeCatalog: async (catalog: CatalogShape, etag) =>
+    writeBlob(CATALOG_PATH, catalog, etag),
+  readRounds: async () => {
+    const v = await readBlob(ROUNDS_PATH);
+    return { data: v.data ?? [], etag: v.etag };
+  },
+  writeRounds: async (rounds: RoundState[], etag) =>
+    writeBlob(ROUNDS_PATH, rounds, etag),
+  isMigrated: async () => exists(MIGRATED_PATH),
+  markMigrated: async () => writeBlob(MIGRATED_PATH, { ok: true, at: Date.now() }),
 });

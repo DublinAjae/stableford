@@ -31,6 +31,11 @@ export type DbShape = {
   rounds: RoundState[];
 };
 
+export type VersionedRead = {
+  data: unknown;
+  etag: string | null;
+};
+
 export function emptyDb(): DbShape {
   return { version: 3, courses: [], members: [], rounds: [] };
 }
@@ -122,32 +127,44 @@ function listItem(r: RoundState): RoundListItem {
   };
 }
 
+function isConflict(e: unknown): boolean {
+  if (!e) return false;
+  if (typeof e === "object" && e !== null && "name" in e) {
+    if (String((e as { name: string }).name).includes("Precondition")) {
+      return true;
+    }
+  }
+  return e instanceof Error && /precondition|412|conflict/i.test(e.message);
+}
+
 export type StoreIO = {
-  /** Full legacy read (used once for migration). */
   readAll?: () => Promise<unknown>;
-  readCatalog: () => Promise<unknown>;
-  writeCatalog: (catalog: CatalogShape) => Promise<void>;
-  readRounds: () => Promise<unknown>;
-  writeRounds: (rounds: RoundState[]) => Promise<void>;
+  readCatalog: () => Promise<VersionedRead>;
+  writeCatalog: (catalog: CatalogShape, etag: string | null) => Promise<void>;
+  readRounds: () => Promise<VersionedRead>;
+  writeRounds: (rounds: RoundState[], etag: string | null) => Promise<void>;
+  isMigrated?: () => Promise<boolean>;
+  markMigrated?: () => Promise<void>;
 };
 
 export function createJsonStore(io: StoreIO): RoundStore {
   let migrated = false;
 
   async function ensureMigrated(): Promise<void> {
-    if (migrated || !io.readAll) {
-      migrated = true;
-      return;
-    }
+    if (migrated) return;
     migrated = true;
+    if (!io.readAll) return;
     try {
-      const catalog = migrateCatalog(await io.readCatalog());
-      const rounds = migrateRounds(await io.readRounds());
+      if (io.isMigrated && (await io.isMigrated())) return;
+
+      const catalog = migrateCatalog((await io.readCatalog()).data);
+      const rounds = migrateRounds((await io.readRounds()).data);
       if (
         catalog.courses.length ||
         catalog.members.length ||
         rounds.length
       ) {
+        await io.markMigrated?.();
         return;
       }
 
@@ -157,25 +174,70 @@ export function createJsonStore(io: StoreIO): RoundStore {
         legacy.members.length ||
         legacy.rounds.length
       ) {
-        await io.writeCatalog({
-          courses: legacy.courses,
-          members: legacy.members,
-        });
-        await io.writeRounds(legacy.rounds);
+        await io.writeCatalog(
+          { courses: legacy.courses, members: legacy.members },
+          null,
+        );
+        await io.writeRounds(legacy.rounds, null);
       }
+      await io.markMigrated?.();
     } catch {
-      // ignore migration errors; fresh stores start empty
+      // ignore migration errors
     }
+  }
+
+  async function withCatalogRetry<T>(
+    mutator: (catalog: CatalogShape) => { catalog: CatalogShape; result: T },
+  ): Promise<T> {
+    await ensureMigrated();
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const versioned = await io.readCatalog();
+      const catalog = migrateCatalog(versioned.data);
+      const { catalog: next, result } = mutator(catalog);
+      try {
+        await io.writeCatalog(next, versioned.etag);
+        return result;
+      } catch (e) {
+        lastError = e;
+        if (!isConflict(e)) throw e;
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("코스/회원 저장 충돌이 반복되었습니다.");
+  }
+
+  async function withRoundsRetry<T>(
+    mutator: (rounds: RoundState[]) => { rounds: RoundState[]; result: T },
+  ): Promise<T> {
+    await ensureMigrated();
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const versioned = await io.readRounds();
+      const rounds = migrateRounds(versioned.data);
+      const { rounds: next, result } = mutator(rounds);
+      try {
+        await io.writeRounds(next, versioned.etag);
+        return result;
+      } catch (e) {
+        lastError = e;
+        if (!isConflict(e)) throw e;
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("대회 데이터 저장 충돌이 반복되었습니다.");
   }
 
   async function loadCatalog(): Promise<CatalogShape> {
     await ensureMigrated();
-    return migrateCatalog(await io.readCatalog());
+    return migrateCatalog((await io.readCatalog()).data);
   }
 
   async function loadRounds(): Promise<RoundState[]> {
     await ensureMigrated();
-    return migrateRounds(await io.readRounds());
+    return migrateRounds((await io.readRounds()).data);
   }
 
   return {
@@ -193,19 +255,12 @@ export function createJsonStore(io: StoreIO): RoundStore {
     },
 
     async createRound(input: CreateRoundInput) {
-      const [catalog, rounds] = await Promise.all([
-        loadCatalog(),
-        loadRounds(),
-      ]);
-      if (rounds.some((r) => r.round.slug === input.slug)) {
-        throw new Error("슬러그가 이미 존재합니다.");
-      }
-
+      const catalog = await loadCatalog();
       let holes: CourseHole[] = input.course ?? defaultCourse();
       let courseName = input.courseName || "Course";
       let teeColor: TeeColor = input.teeColor || "white";
       let lengthMeters = input.lengthMeters ?? null;
-      let courseId = input.courseId ?? null;
+      const courseId = input.courseId ?? null;
 
       if (courseId) {
         const found = catalog.courses.find((c) => c.id === courseId);
@@ -233,117 +288,122 @@ export function createJsonStore(io: StoreIO): RoundStore {
         players: [],
         scores: [],
       };
-      await io.writeRounds([...rounds, state]);
-      return state;
+
+      return withRoundsRetry((rounds) => {
+        if (rounds.some((r) => r.round.slug === input.slug)) {
+          throw new Error("슬러그가 이미 존재합니다.");
+        }
+        return { rounds: [...rounds, state], result: state };
+      });
     },
 
     async updateRoundMeta(slug, patch) {
-      const rounds = await loadRounds();
-      const idx = rounds.findIndex((r) => r.round.slug === slug);
-      if (idx < 0) return null;
-      const prev = rounds[idx];
-      const next = touch({
-        ...prev,
-        round: {
-          ...prev.round,
-          name: patch.name ?? prev.round.name,
-          date: patch.date ?? prev.round.date,
-          courseId:
-            patch.courseId !== undefined ? patch.courseId : prev.round.courseId,
-          courseName: patch.courseName ?? prev.round.courseName,
-          teeColor: patch.teeColor ?? prev.round.teeColor,
-          lengthMeters:
-            patch.lengthMeters !== undefined
-              ? patch.lengthMeters
-              : prev.round.lengthMeters,
-        },
+      return withRoundsRetry((rounds) => {
+        const idx = rounds.findIndex((r) => r.round.slug === slug);
+        if (idx < 0) return { rounds, result: null };
+        const prev = rounds[idx];
+        const next = touch({
+          ...prev,
+          round: {
+            ...prev.round,
+            name: patch.name ?? prev.round.name,
+            date: patch.date ?? prev.round.date,
+            courseId:
+              patch.courseId !== undefined
+                ? patch.courseId
+                : prev.round.courseId,
+            courseName: patch.courseName ?? prev.round.courseName,
+            teeColor: patch.teeColor ?? prev.round.teeColor,
+            lengthMeters:
+              patch.lengthMeters !== undefined
+                ? patch.lengthMeters
+                : prev.round.lengthMeters,
+          },
+        });
+        const copy = [...rounds];
+        copy[idx] = next;
+        return { rounds: copy, result: next };
       });
-      const copy = [...rounds];
-      copy[idx] = next;
-      await io.writeRounds(copy);
-      return next;
     },
 
     async setCourse(slug, course) {
-      const rounds = await loadRounds();
-      const idx = rounds.findIndex((r) => r.round.slug === slug);
-      if (idx < 0) return null;
-      const next = touch({ ...rounds[idx], course });
-      const copy = [...rounds];
-      copy[idx] = next;
-      await io.writeRounds(copy);
-      return next;
+      return withRoundsRetry((rounds) => {
+        const idx = rounds.findIndex((r) => r.round.slug === slug);
+        if (idx < 0) return { rounds, result: null };
+        const next = touch({ ...rounds[idx], course });
+        const copy = [...rounds];
+        copy[idx] = next;
+        return { rounds: copy, result: next };
+      });
     },
 
     async applyCatalogCourse(slug, courseId) {
-      const [catalog, rounds] = await Promise.all([
-        loadCatalog(),
-        loadRounds(),
-      ]);
-      const idx = rounds.findIndex((r) => r.round.slug === slug);
-      if (idx < 0) return null;
+      const catalog = await loadCatalog();
       const found = catalog.courses.find((c) => c.id === courseId);
       if (!found) throw new Error("코스를 찾을 수 없습니다.");
-      const prev = rounds[idx];
-      const next = touch({
-        ...prev,
-        course: found.holes,
-        round: {
-          ...prev.round,
-          courseId: found.id,
-          courseName: found.name,
-          teeColor: found.teeColor,
-          lengthMeters: found.lengthMeters,
-        },
+      return withRoundsRetry((rounds) => {
+        const idx = rounds.findIndex((r) => r.round.slug === slug);
+        if (idx < 0) return { rounds, result: null };
+        const prev = rounds[idx];
+        const next = touch({
+          ...prev,
+          course: found.holes,
+          round: {
+            ...prev.round,
+            courseId: found.id,
+            courseName: found.name,
+            teeColor: found.teeColor,
+            lengthMeters: found.lengthMeters,
+          },
+        });
+        const copy = [...rounds];
+        copy[idx] = next;
+        return { rounds: copy, result: next };
       });
-      const copy = [...rounds];
-      copy[idx] = next;
-      await io.writeRounds(copy);
-      return next;
     },
 
     async setPlayers(slug, playersInput: UpsertPlayerInput[]) {
-      const rounds = await loadRounds();
-      const idx = rounds.findIndex((r) => r.round.slug === slug);
-      if (idx < 0) return null;
-      const prev = rounds[idx];
-      const players: Player[] = playersInput.map((p, i) => ({
-        id:
-          p.id && prev.players.some((x) => x.id === p.id)
-            ? p.id
-            : randomUUID(),
-        memberId: p.memberId ?? null,
-        name: p.name.trim() || `Player ${i + 1}`,
-        courseHandicap: p.courseHandicap,
-        groupCode: (p.groupCode || "A").toUpperCase(),
-        sortOrder: p.sortOrder ?? i,
-      }));
-      const keep = new Set(players.map((p) => p.id));
-      const scores = prev.scores.filter((s) => keep.has(s.playerId));
-      const scoreMap = new Map<string, Score>(
-        scores.map((s) => [`${s.playerId}:${s.hole}`, s]),
-      );
-      for (const player of players) {
-        for (const hole of prev.course) {
-          const key = `${player.id}:${hole.hole}`;
-          if (!scoreMap.has(key)) {
-            scoreMap.set(key, {
-              playerId: player.id,
-              hole: hole.hole,
-              gross: null,
-            });
+      return withRoundsRetry((rounds) => {
+        const idx = rounds.findIndex((r) => r.round.slug === slug);
+        if (idx < 0) return { rounds, result: null };
+        const prev = rounds[idx];
+        const players: Player[] = playersInput.map((p, i) => ({
+          id:
+            p.id && prev.players.some((x) => x.id === p.id)
+              ? p.id
+              : randomUUID(),
+          memberId: p.memberId ?? null,
+          name: p.name.trim() || `Player ${i + 1}`,
+          courseHandicap: p.courseHandicap,
+          groupCode: (p.groupCode || "A").toUpperCase(),
+          sortOrder: p.sortOrder ?? i,
+        }));
+        const keep = new Set(players.map((p) => p.id));
+        const scores = prev.scores.filter((s) => keep.has(s.playerId));
+        const scoreMap = new Map<string, Score>(
+          scores.map((s) => [`${s.playerId}:${s.hole}`, s]),
+        );
+        for (const player of players) {
+          for (const hole of prev.course) {
+            const key = `${player.id}:${hole.hole}`;
+            if (!scoreMap.has(key)) {
+              scoreMap.set(key, {
+                playerId: player.id,
+                hole: hole.hole,
+                gross: null,
+              });
+            }
           }
         }
-      }
-      const next = touch({
-        ...prev,
-        players,
-        scores: [...scoreMap.values()],
+        const next = touch({
+          ...prev,
+          players,
+          scores: [...scoreMap.values()],
+        });
+        const copy = [...rounds];
+        copy[idx] = next;
+        return { rounds: copy, result: next };
       });
-      const copy = [...rounds];
-      copy[idx] = next;
-      await io.writeRounds(copy);
-      return next;
     },
 
     async upsertScore(slug, playerId, hole, gross) {
@@ -351,25 +411,25 @@ export function createJsonStore(io: StoreIO): RoundStore {
     },
 
     async upsertScores(slug, incoming) {
-      const rounds = await loadRounds();
-      const idx = rounds.findIndex((r) => r.round.slug === slug);
-      if (idx < 0) return null;
-      const prev = rounds[idx];
-      const map = new Map<string, Score>(
-        prev.scores.map((s) => [`${s.playerId}:${s.hole}`, s]),
-      );
-      for (const s of incoming) {
-        map.set(`${s.playerId}:${s.hole}`, {
-          playerId: s.playerId,
-          hole: s.hole,
-          gross: s.gross,
-        });
-      }
-      const next = touch({ ...prev, scores: [...map.values()] });
-      const copy = [...rounds];
-      copy[idx] = next;
-      await io.writeRounds(copy);
-      return next;
+      return withRoundsRetry((rounds) => {
+        const idx = rounds.findIndex((r) => r.round.slug === slug);
+        if (idx < 0) return { rounds, result: null };
+        const prev = rounds[idx];
+        const map = new Map<string, Score>(
+          prev.scores.map((s) => [`${s.playerId}:${s.hole}`, s]),
+        );
+        for (const s of incoming) {
+          map.set(`${s.playerId}:${s.hole}`, {
+            playerId: s.playerId,
+            hole: s.hole,
+            gross: s.gross,
+          });
+        }
+        const next = touch({ ...prev, scores: [...map.values()] });
+        const copy = [...rounds];
+        copy[idx] = next;
+        return { rounds: copy, result: next };
+      });
     },
 
     async listCourses() {
@@ -383,50 +443,54 @@ export function createJsonStore(io: StoreIO): RoundStore {
     },
 
     async upsertCourse(input: UpsertGolfCourseInput) {
-      const catalog = await loadCatalog();
       const now = new Date().toISOString();
       const holes = normalizeHoles(input.holes, input.holeCount);
-      if (input.id) {
-        const idx = catalog.courses.findIndex((c) => c.id === input.id);
-        if (idx >= 0) {
-          const next: GolfCourse = {
-            ...catalog.courses[idx],
-            name: input.name.trim(),
-            lengthMeters: input.lengthMeters,
-            teeColor: input.teeColor,
-            holeCount: input.holeCount,
-            holes,
-            updatedAt: now,
-          };
-          const courses = [...catalog.courses];
-          courses[idx] = next;
-          await io.writeCatalog({ ...catalog, courses });
-          return next;
+      return withCatalogRetry((catalog) => {
+        if (input.id) {
+          const idx = catalog.courses.findIndex((c) => c.id === input.id);
+          if (idx >= 0) {
+            const next: GolfCourse = {
+              ...catalog.courses[idx],
+              name: input.name.trim(),
+              lengthMeters: input.lengthMeters,
+              teeColor: input.teeColor,
+              holeCount: input.holeCount,
+              holes,
+              updatedAt: now,
+            };
+            const courses = [...catalog.courses];
+            courses[idx] = next;
+            return { catalog: { ...catalog, courses }, result: next };
+          }
         }
-      }
-      const created: GolfCourse = {
-        id: randomUUID(),
-        name: input.name.trim() || "Untitled course",
-        lengthMeters: input.lengthMeters,
-        teeColor: input.teeColor,
-        holeCount: input.holeCount,
-        holes: holes.length ? holes : emptyHoles(input.holeCount),
-        createdAt: now,
-        updatedAt: now,
-      };
-      await io.writeCatalog({
-        ...catalog,
-        courses: [...catalog.courses, created],
+        const created: GolfCourse = {
+          id: randomUUID(),
+          name: input.name.trim() || "Untitled course",
+          lengthMeters: input.lengthMeters,
+          teeColor: input.teeColor,
+          holeCount: input.holeCount,
+          holes: holes.length ? holes : emptyHoles(input.holeCount),
+          createdAt: now,
+          updatedAt: now,
+        };
+        return {
+          catalog: {
+            ...catalog,
+            courses: [...catalog.courses, created],
+          },
+          result: created,
+        };
       });
-      return created;
     },
 
     async deleteCourse(id) {
-      const catalog = await loadCatalog();
-      await io.writeCatalog({
-        ...catalog,
-        courses: catalog.courses.filter((c) => c.id !== id),
-      });
+      await withCatalogRetry((catalog) => ({
+        catalog: {
+          ...catalog,
+          courses: catalog.courses.filter((c) => c.id !== id),
+        },
+        result: undefined,
+      }));
     },
 
     async listMembers() {
@@ -440,45 +504,49 @@ export function createJsonStore(io: StoreIO): RoundStore {
     },
 
     async upsertMember(input: UpsertMemberInput) {
-      const catalog = await loadCatalog();
       const now = new Date().toISOString();
       const name = input.name.trim() || "Untitled";
       const handicap = Number.isFinite(input.handicap) ? input.handicap : 18;
-      if (input.id) {
-        const idx = catalog.members.findIndex((m) => m.id === input.id);
-        if (idx >= 0) {
-          const next: Member = {
-            ...catalog.members[idx],
-            name,
-            handicap,
-            updatedAt: now,
-          };
-          const members = [...catalog.members];
-          members[idx] = next;
-          await io.writeCatalog({ ...catalog, members });
-          return next;
+      return withCatalogRetry((catalog) => {
+        if (input.id) {
+          const idx = catalog.members.findIndex((m) => m.id === input.id);
+          if (idx >= 0) {
+            const next: Member = {
+              ...catalog.members[idx],
+              name,
+              handicap,
+              updatedAt: now,
+            };
+            const members = [...catalog.members];
+            members[idx] = next;
+            return { catalog: { ...catalog, members }, result: next };
+          }
         }
-      }
-      const created: Member = {
-        id: randomUUID(),
-        name,
-        handicap,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await io.writeCatalog({
-        ...catalog,
-        members: [...catalog.members, created],
+        const created: Member = {
+          id: randomUUID(),
+          name,
+          handicap,
+          createdAt: now,
+          updatedAt: now,
+        };
+        return {
+          catalog: {
+            ...catalog,
+            members: [...catalog.members, created],
+          },
+          result: created,
+        };
       });
-      return created;
     },
 
     async deleteMember(id) {
-      const catalog = await loadCatalog();
-      await io.writeCatalog({
-        ...catalog,
-        members: catalog.members.filter((m) => m.id !== id),
-      });
+      await withCatalogRetry((catalog) => ({
+        catalog: {
+          ...catalog,
+          members: catalog.members.filter((m) => m.id !== id),
+        },
+        result: undefined,
+      }));
     },
   };
 }
