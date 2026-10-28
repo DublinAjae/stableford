@@ -50,11 +50,30 @@ export type GolfCourse = {
   updatedAt: string;
 };
 
+export type HandicapEntry = {
+  at: string;
+  handicap: number;
+  source: "manual" | "round";
+  roundSlug?: string;
+  roundName?: string;
+};
+
+export type MemberAward = {
+  roundSlug: string;
+  roundName: string;
+  date: string;
+  rank: 1 | 2 | 3;
+  points: number;
+};
+
 /** Reusable club member roster (name + handicap). */
 export type Member = {
   id: string;
   name: string;
   handicap: number;
+  /** Free-form notes / 비고 */
+  notes: string;
+  handicapHistory: HandicapEntry[];
   createdAt: string;
   updatedAt: string;
 };

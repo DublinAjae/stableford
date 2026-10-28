@@ -153,3 +153,41 @@ input[type="number"]::-webkit-outer-spin-button {
   border-color: var(--lime);
   color: var(--lime);
 }
+
+.field-invalid {
+  border-color: rgba(251, 191, 36, 0.75) !important;
+  background: rgba(251, 191, 36, 0.12);
+  color: #fef3c7;
+}
+
+.par-3 {
+  color: #7dd3fc;
+}
+
+.par-5 {
+  color: #fbbf24;
+}
+
+.player-name {
+  font-weight: 700;
+  color: var(--foam);
+  letter-spacing: -0.01em;
+}
+
+.player-hcp {
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: rgba(214, 240, 106, 0.92);
+  font-variant-numeric: tabular-nums;
+}
+
+.player-hcp.inline {
+  margin-top: 0;
+  font-size: inherit;
+}
+
+.score-best {
+  background: rgba(214, 240, 106, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(214, 240, 106, 0.28);
+}

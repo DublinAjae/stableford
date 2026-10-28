@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Shell from "@/components/Shell";
 import Podium from "@/components/Podium";
@@ -12,8 +12,7 @@ import MemberEditor from "@/components/MemberEditor";
 import { useRoundState } from "@/hooks/useRoundState";
 import { TEE_COLOR_LABELS } from "@/lib/courses";
 import { groupCodes, rankPlayers } from "@/lib/ranking";
-import { recognizeScorecard } from "@/lib/ocr";
-import type { CourseHole, GolfCourse, Member, RoundState } from "@/lib/types";
+import type { GolfCourse, Member, RoundState } from "@/lib/types";
 import type { UpsertPlayerInput } from "@/lib/store";
 
 export default function AdminPanel({ slug }: { slug: string }) {
@@ -31,7 +30,6 @@ export default function AdminPanel({ slug }: { slug: string }) {
   const [courses, setCourses] = useState<GolfCourse[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const standings = useMemo(
     () => (state ? rankPlayers(state) : []),
@@ -78,22 +76,6 @@ export default function AdminPanel({ slug }: { slug: string }) {
       return;
     }
     await refresh();
-  }
-
-  async function saveCourse(course: CourseHole[]) {
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/rounds/${slug}/course`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ course }),
-      });
-      const body = (await res.json()) as { state?: RoundState; error?: string };
-      if (!res.ok) throw new Error(body.error || "저장 실패");
-      if (body.state) applyServerState(body.state);
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function applyCatalogCourse() {
@@ -146,28 +128,6 @@ export default function AdminPanel({ slug }: { slug: string }) {
     });
     const body = (await res.json()) as { state?: RoundState };
     if (body.state) applyServerState(body.state);
-  }
-
-  async function onCoursePhoto(file: File) {
-    setOcrNote("스코어카드에서 Par / SI 읽는 중…");
-    try {
-      const result = await recognizeScorecard(file);
-      if (!state) return;
-      const course = state.course.map((h) => {
-        const parsed = result.holes.find((x) => x.hole === h.hole);
-        return {
-          hole: h.hole,
-          par: parsed?.par ?? h.par,
-          strokeIndex: parsed?.strokeIndex ?? h.strokeIndex,
-        };
-      });
-      setState({ ...state, course });
-      setOcrNote(
-        `OCR 완료 (${result.confidence}). 확인 후 저장하세요. ${result.notes.join(" ")}`,
-      );
-    } catch {
-      setOcrNote("OCR 실패 — 수동으로 입력해 주세요.");
-    }
   }
 
   if (loading && !state) {
@@ -276,6 +236,10 @@ export default function AdminPanel({ slug }: { slug: string }) {
             <p className="text-xs uppercase tracking-[0.16em] text-[var(--foam)]/45">
               골프 코스 선택
             </p>
+            <p className="mt-2 text-sm text-[var(--foam)]/50">
+              대회 코스의 Par/SI는 여기서 수정할 수 없습니다. 코스 관리에서
+              수정한 뒤 다시 적용하세요.
+            </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <select
                 className="min-w-[16rem] flex-1 rounded-sm border border-white/15 bg-black/30 px-3 py-2 text-[var(--foam)] outline-none focus:border-[var(--lime)]"
@@ -301,42 +265,11 @@ export default function AdminPanel({ slug }: { slug: string }) {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => fileRef.current?.click()}
-            >
-              사진으로 Par/SI 채우기
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void onCoursePhoto(f);
-              }}
-            />
-            <button
-              type="button"
-              disabled={busy}
-              className="btn-ghost"
-              onClick={() => void saveCourse(state.course)}
-            >
-              이 대회 Par/SI 저장
-            </button>
-          </div>
           {ocrNote && (
             <p className="text-sm text-[var(--foam)]/55">{ocrNote}</p>
           )}
           <div className="rounded-sm border border-white/10 bg-black/20 p-3">
-            <HoleParSiEditor
-              holes={state.course}
-              onChange={(course) => setState({ ...state, course })}
-            />
+            <HoleParSiEditor holes={state.course} readOnly />
           </div>
         </div>
       )}

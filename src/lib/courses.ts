@@ -35,6 +35,22 @@ export function normalizeHoles(
   });
 }
 
+export function assertUniqueStrokeIndexes(holes: CourseHole[]): void {
+  const counts = new Map<number, number>();
+  for (const h of holes) {
+    counts.set(h.strokeIndex, (counts.get(h.strokeIndex) || 0) + 1);
+  }
+  const dupes = [...counts.entries()]
+    .filter(([, n]) => n > 1)
+    .map(([si]) => si)
+    .sort((a, b) => a - b);
+  if (dupes.length) {
+    throw new Error(
+      `SI 중복(${dupes.join(", ")}) — 각 홀 SI는 서로 달라야 저장할 수 있습니다.`,
+    );
+  }
+}
+
 export function slugify(input: string): string {
   return input
     .trim()

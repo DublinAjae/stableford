@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import HoleParSiEditor, { parTotals } from "@/components/HoleParSiEditor";
+import HoleParSiEditor, {
+  hasDuplicateStrokeIndexes,
+  parTotals,
+} from "@/components/HoleParSiEditor";
 import { emptyHoles, TEE_COLOR_LABELS } from "@/lib/courses";
 import { recognizeScorecard } from "@/lib/ocr";
 import type { CourseHole, GolfCourse, TeeColor } from "@/lib/types";
@@ -64,6 +67,11 @@ export default function CourseEditor({
     setBusy(true);
     setError(null);
     try {
+      if (hasDuplicateStrokeIndexes(draft.holes)) {
+        throw new Error(
+          "SI가 중복된 홀이 있어 저장할 수 없습니다. 하이라이트된 SI를 수정하세요.",
+        );
+      }
       const payload = {
         id: draft.id,
         name: draft.name.trim(),
@@ -271,12 +279,21 @@ export default function CourseEditor({
           <button
             type="button"
             className="btn-solid"
-            disabled={busy || !draft.name.trim()}
+            disabled={
+              busy ||
+              !draft.name.trim() ||
+              hasDuplicateStrokeIndexes(draft.holes)
+            }
             onClick={() => void save()}
           >
             코스 저장
           </button>
         </div>
+        {hasDuplicateStrokeIndexes(draft.holes) && (
+          <p className="text-sm text-amber-100">
+            SI 중복이 있어 저장할 수 없습니다. 하이라이트된 값을 수정하세요.
+          </p>
+        )}
         {note && <p className="text-sm text-[var(--foam)]/55">{note}</p>}
         {error && <p className="text-sm text-red-200">{error}</p>}
 

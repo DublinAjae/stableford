@@ -21,6 +21,7 @@ export type UpsertMemberInput = {
   id?: string;
   name: string;
   handicap: number;
+  notes?: string;
 };
 
 export type CreateRoundInput = {

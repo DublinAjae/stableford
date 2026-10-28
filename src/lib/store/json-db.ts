@@ -1,5 +1,10 @@
 import { randomUUID } from "crypto";
-import { emptyHoles, normalizeHoles } from "@/lib/courses";
+import {
+  assertUniqueStrokeIndexes,
+  emptyHoles,
+  normalizeHoles,
+} from "@/lib/courses";
+import { appendHandicapHistory, normalizeMember } from "@/lib/members";
 import { defaultCourse } from "@/lib/ranking";
 import type {
   CourseHole,
@@ -54,7 +59,9 @@ function migrate(raw: unknown): DbShape {
   return {
     version: 3,
     courses: Array.isArray(obj.courses) ? obj.courses : [],
-    members: Array.isArray(obj.members) ? obj.members : [],
+    members: (Array.isArray(obj.members) ? obj.members : []).map((m) =>
+      normalizeMember(m),
+    ),
     rounds: (Array.isArray(obj.rounds) ? obj.rounds : []).map(normalizeRound),
   };
 }
@@ -64,7 +71,9 @@ function migrateCatalog(raw: unknown): CatalogShape {
   const obj = raw as { courses?: GolfCourse[]; members?: Member[] };
   return {
     courses: Array.isArray(obj.courses) ? obj.courses : [],
-    members: Array.isArray(obj.members) ? obj.members : [],
+    members: (Array.isArray(obj.members) ? obj.members : []).map((m) =>
+      normalizeMember(m),
+    ),
   };
 }
 
@@ -445,6 +454,7 @@ export function createJsonStore(io: StoreIO): RoundStore {
     async upsertCourse(input: UpsertGolfCourseInput) {
       const now = new Date().toISOString();
       const holes = normalizeHoles(input.holes, input.holeCount);
+      assertUniqueStrokeIndexes(holes);
       return withCatalogRetry((catalog) => {
         if (input.id) {
           const idx = catalog.courses.findIndex((c) => c.id === input.id);
@@ -507,14 +517,18 @@ export function createJsonStore(io: StoreIO): RoundStore {
       const now = new Date().toISOString();
       const name = input.name.trim() || "Untitled";
       const handicap = Number.isFinite(input.handicap) ? input.handicap : 18;
+      const notes = typeof input.notes === "string" ? input.notes : "";
       return withCatalogRetry((catalog) => {
         if (input.id) {
           const idx = catalog.members.findIndex((m) => m.id === input.id);
           if (idx >= 0) {
+            const prev = normalizeMember(catalog.members[idx]);
             const next: Member = {
-              ...catalog.members[idx],
+              ...prev,
               name,
               handicap,
+              notes: input.notes !== undefined ? notes : prev.notes,
+              handicapHistory: appendHandicapHistory(prev, handicap, now),
               updatedAt: now,
             };
             const members = [...catalog.members];
@@ -522,13 +536,17 @@ export function createJsonStore(io: StoreIO): RoundStore {
             return { catalog: { ...catalog, members }, result: next };
           }
         }
-        const created: Member = {
+        const created: Member = normalizeMember({
           id: randomUUID(),
           name,
           handicap,
+          notes,
+          handicapHistory: [
+            { at: now, handicap, source: "manual" },
+          ],
           createdAt: now,
           updatedAt: now,
-        };
+        });
         return {
           catalog: {
             ...catalog,
