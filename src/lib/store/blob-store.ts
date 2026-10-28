@@ -1,4 +1,4 @@
-import { get, list, put } from "@vercel/blob";
+import { list, put } from "@vercel/blob";
 import { unstable_noStore as noStore } from "next/cache";
 import {
   createJsonStore,
@@ -22,19 +22,20 @@ function tokenOrThrow(): string {
   return token;
 }
 
-async function readPath(pathname: string): Promise<unknown | null> {
+/**
+ * Versioned blobs are immutable unique paths, so CDN cache is safe.
+ * We discover the latest via list() (Blob API, not CDN), then fetch that URL
+ * with cache:'no-store' so Next.js never reuses a cached GET.
+ */
+async function fetchJson(url: string): Promise<unknown | null> {
   noStore();
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) return null;
   try {
-    // Public CDN ignores useCache:false — private + cache=0 is required for fresh reads.
-    const result = await get(pathname, {
-      access: "private",
-      token,
-      useCache: false,
+    const response = await fetch(`${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`, {
+      cache: "no-store",
+      headers: { "Cache-Control": "no-cache" },
     });
-    if (!result || result.statusCode !== 200 || !result.stream) return null;
-    const text = await new Response(result.stream).text();
+    if (!response.ok) return null;
+    const text = await response.text();
     if (!text) return null;
     return JSON.parse(text) as unknown;
   } catch {
@@ -44,7 +45,7 @@ async function readPath(pathname: string): Promise<unknown | null> {
 
 async function readLatest(
   prefix: string,
-  fallbackPath?: string,
+  fallbackPathname?: string,
 ): Promise<unknown | null> {
   noStore();
   const token = process.env.BLOB_READ_WRITE_TOKEN;
@@ -53,14 +54,26 @@ async function readLatest(
     const { blobs } = await list({ prefix, token, limit: 1000 });
     if (blobs.length > 0) {
       // Pathnames are v-{Date.now()}-{rand}.json — lexicographic max is newest.
-      const latest = blobs.map((b) => b.pathname).sort().at(-1)!;
-      const data = await readPath(latest);
+      const latest = blobs.slice().sort((a, b) => a.pathname.localeCompare(b.pathname)).at(-1)!;
+      const data = await fetchJson(latest.url);
       if (data != null) return data;
     }
   } catch {
     // fall through
   }
-  if (fallbackPath) return readPath(fallbackPath);
+  if (fallbackPathname) {
+    try {
+      const { blobs } = await list({
+        prefix: fallbackPathname,
+        token,
+        limit: 10,
+      });
+      const exact = blobs.find((b) => b.pathname === fallbackPathname);
+      if (exact) return fetchJson(exact.url);
+    } catch {
+      // ignore
+    }
+  }
   return null;
 }
 
@@ -77,7 +90,20 @@ async function writeVersioned(prefix: string, data: unknown): Promise<void> {
 }
 
 async function readMigrated(): Promise<boolean> {
-  return Boolean(await readPath(MIGRATED_PATH));
+  const data = await readLatest(MIGRATED_PATH);
+  // list prefix match may return the file itself when prefix==pathname
+  if (data) return true;
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) return false;
+  try {
+    const { blobs } = await list({ prefix: MIGRATED_PATH, token, limit: 5 });
+    const exact = blobs.find((b) => b.pathname === MIGRATED_PATH);
+    if (!exact) return false;
+    const body = await fetchJson(exact.url);
+    return Boolean(body);
+  } catch {
+    return false;
+  }
 }
 
 async function markMigrated(): Promise<void> {
@@ -93,8 +119,21 @@ async function markMigrated(): Promise<void> {
   });
 }
 
+async function readLegacy(): Promise<unknown | null> {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) return null;
+  try {
+    const { blobs } = await list({ prefix: LEGACY_PATH, token, limit: 5 });
+    const exact = blobs.find((b) => b.pathname === LEGACY_PATH);
+    if (!exact) return null;
+    return fetchJson(exact.url);
+  } catch {
+    return null;
+  }
+}
+
 export const blobStore = createJsonStore({
-  readAll: async () => (await readPath(LEGACY_PATH)) ?? emptyDb(),
+  readAll: async () => (await readLegacy()) ?? emptyDb(),
   readCatalog: async (): Promise<VersionedRead> => ({
     data: (await readLatest(CATALOG_PREFIX, CATALOG_FALLBACK)) ?? emptyCatalog(),
     etag: null,
