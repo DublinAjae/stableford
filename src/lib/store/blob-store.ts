@@ -1,4 +1,4 @@
-import { head, put } from "@vercel/blob";
+import { get, put } from "@vercel/blob";
 import {
   createJsonStore,
   emptyCatalog,
@@ -15,11 +15,15 @@ async function readBlob(pathname: string): Promise<unknown | null> {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) return null;
   try {
-    const meta = await head(pathname, { token });
-    const url = `${meta.url}${meta.url.includes("?") ? "&" : "?"}t=${Date.now()}`;
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return null;
-    return await res.json();
+    const result = await get(pathname, {
+      access: "public",
+      token,
+      useCache: false,
+    });
+    if (!result || result.statusCode !== 200 || !result.stream) return null;
+    const text = await new Response(result.stream).text();
+    if (!text) return null;
+    return JSON.parse(text) as unknown;
   } catch {
     return null;
   }
