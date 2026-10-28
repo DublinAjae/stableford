@@ -15,6 +15,12 @@ export function useRoundState({ slug, intervalMs = 1500 }: Options) {
   const [error, setError] = useState<string | null>(null);
   const updatedAtRef = useRef<string>("");
 
+  /** Apply authoritative server state (also advances the poll watermark). */
+  const applyServerState = useCallback((next: RoundState) => {
+    updatedAtRef.current = next.round.updatedAt;
+    setState(next);
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const res = await fetch(`/api/rounds/${slug}`, { cache: "no-store" });
@@ -28,11 +34,11 @@ export function useRoundState({ slug, intervalMs = 1500 }: Options) {
         state: RoundState;
         admin: boolean;
       };
-      if (body.state.round.updatedAt !== updatedAtRef.current || !state) {
-        updatedAtRef.current = body.state.round.updatedAt;
-        setState(body.state);
-      } else {
-        // still sync admin flag
+      const incoming = body.state.round.updatedAt;
+      // Only replace local state when the server actually has a newer revision.
+      // This preserves unsaved edits (e.g. drafted players/groups).
+      if (!updatedAtRef.current || incoming > updatedAtRef.current) {
+        updatedAtRef.current = incoming;
         setState(body.state);
       }
       setAdmin(body.admin);
@@ -42,7 +48,7 @@ export function useRoundState({ slug, intervalMs = 1500 }: Options) {
     } finally {
       setLoading(false);
     }
-  }, [slug, state]);
+  }, [slug]);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,11 +62,12 @@ export function useRoundState({ slug, intervalMs = 1500 }: Options) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [slug, intervalMs]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [slug, intervalMs, refresh]);
 
   return {
     state,
     setState,
+    applyServerState,
     admin,
     loading,
     error,

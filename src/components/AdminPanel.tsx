@@ -17,9 +17,10 @@ import type { CourseHole, GolfCourse, Member, RoundState } from "@/lib/types";
 import type { UpsertPlayerInput } from "@/lib/store";
 
 export default function AdminPanel({ slug }: { slug: string }) {
-  const { state, setState, admin, loading, error, refresh } = useRoundState({
-    slug,
-  });
+  const { state, setState, applyServerState, admin, loading, error, refresh } =
+    useRoundState({
+      slug,
+    });
   const [pin, setPin] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -89,7 +90,7 @@ export default function AdminPanel({ slug }: { slug: string }) {
       });
       const body = (await res.json()) as { state?: RoundState; error?: string };
       if (!res.ok) throw new Error(body.error || "저장 실패");
-      if (body.state) setState(body.state);
+      if (body.state) applyServerState(body.state);
     } finally {
       setBusy(false);
     }
@@ -106,7 +107,7 @@ export default function AdminPanel({ slug }: { slug: string }) {
       });
       const body = (await res.json()) as { state?: RoundState; error?: string };
       if (!res.ok) throw new Error(body.error || "적용 실패");
-      if (body.state) setState(body.state);
+      if (body.state) applyServerState(body.state);
       setOcrNote("선택한 코스의 Par/SI가 이 대회에 적용되었습니다.");
     } finally {
       setBusy(false);
@@ -123,7 +124,8 @@ export default function AdminPanel({ slug }: { slug: string }) {
       });
       const body = (await res.json()) as { state?: RoundState; error?: string };
       if (!res.ok) throw new Error(body.error || "저장 실패");
-      if (body.state) setState(body.state);
+      if (body.state) applyServerState(body.state);
+      return body.state;
     } finally {
       setBusy(false);
     }
@@ -143,7 +145,7 @@ export default function AdminPanel({ slug }: { slug: string }) {
       body: JSON.stringify({ scores: [{ playerId, hole, gross }] }),
     });
     const body = (await res.json()) as { state?: RoundState };
-    if (body.state) setState(body.state);
+    if (body.state) applyServerState(body.state);
   }
 
   async function onCoursePhoto(file: File) {
@@ -352,43 +354,15 @@ export default function AdminPanel({ slug }: { slug: string }) {
           state={state}
           members={members}
           busy={busy}
-          onSave={(players) => void savePlayers(players)}
-          onLocal={(players) =>
-            setState({
-              ...state,
-              players: players.map((p, i) => ({
-                id: p.id || `tmp-${i}`,
-                memberId: p.memberId ?? null,
-                name: p.name,
-                courseHandicap: p.courseHandicap,
-                groupCode: p.groupCode,
-                sortOrder: p.sortOrder,
-              })),
-            })
-          }
+          onSave={savePlayers}
         />
       )}
     </Shell>
   );
 }
 
-function PlayersEditor({
-  state,
-  members,
-  busy,
-  onSave,
-  onLocal,
-}: {
-  state: RoundState;
-  members: Member[];
-  busy: boolean;
-  onSave: (players: UpsertPlayerInput[]) => void;
-  onLocal: (players: UpsertPlayerInput[]) => void;
-}) {
-  const [pickIds, setPickIds] = useState<string[]>([]);
-  const [defaultGroup, setDefaultGroup] = useState("A");
-
-  const rows: UpsertPlayerInput[] = state.players.map((p, i) => ({
+function toPlayerRows(state: RoundState): UpsertPlayerInput[] {
+  return state.players.map((p, i) => ({
     id: p.id,
     memberId: p.memberId,
     name: p.name,
@@ -396,32 +370,71 @@ function PlayersEditor({
     groupCode: p.groupCode,
     sortOrder: p.sortOrder ?? i,
   }));
+}
+
+function PlayersEditor({
+  state,
+  members,
+  busy,
+  onSave,
+}: {
+  state: RoundState;
+  members: Member[];
+  busy: boolean;
+  onSave: (players: UpsertPlayerInput[]) => Promise<RoundState | undefined>;
+}) {
+  const [pickIds, setPickIds] = useState<string[]>([]);
+  const [defaultGroup, setDefaultGroup] = useState("A");
+  const [draft, setDraft] = useState<UpsertPlayerInput[]>(() =>
+    toPlayerRows(state),
+  );
+  const [note, setNote] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const serverStamp = state.round.updatedAt;
+
+  useEffect(() => {
+    setDraft(toPlayerRows(state));
+    // Only reset draft when the server revision changes (after save/poll).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverStamp]);
 
   const already = new Set(
-    rows.map((r) => r.memberId).filter(Boolean) as string[],
+    draft.map((r) => r.memberId).filter(Boolean) as string[],
   );
   const available = members.filter((m) => !already.has(m.id));
 
   function update(i: number, patch: Partial<UpsertPlayerInput>) {
-    const next = rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
-    onLocal(next);
+    setDraft((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   }
 
-  function importSelected() {
+  async function persist(next: UpsertPlayerInput[], successMsg: string) {
+    setSaveError(null);
+    setNote(null);
+    try {
+      await onSave(next);
+      setNote(successMsg);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "저장 실패");
+    }
+  }
+
+  async function importSelected() {
     const selected = members.filter((m) => pickIds.includes(m.id));
     if (!selected.length) return;
+    const group = defaultGroup.toUpperCase() || "A";
     const next = [
-      ...rows,
+      ...draft,
       ...selected.map((m, i) => ({
         memberId: m.id,
         name: m.name,
         courseHandicap: m.handicap,
-        groupCode: defaultGroup.toUpperCase() || "A",
-        sortOrder: rows.length + i,
+        groupCode: group,
+        sortOrder: draft.length + i,
       })),
     ];
-    onLocal(next);
+    setDraft(next);
     setPickIds([]);
+    await persist(next, `${selected.length}명 ${group}조로 저장됨`);
   }
 
   function togglePick(id: string) {
@@ -471,10 +484,10 @@ function PlayersEditor({
               <button
                 type="button"
                 className="btn-solid"
-                disabled={!pickIds.length}
-                onClick={importSelected}
+                disabled={busy || !pickIds.length}
+                onClick={() => void importSelected()}
               >
-                선택 회원 추가
+                선택 회원으로 조 추가·저장
               </button>
             </div>
           </>
@@ -485,15 +498,16 @@ function PlayersEditor({
         <button
           type="button"
           className="btn-ghost"
+          disabled={busy}
           onClick={() =>
-            onLocal([
-              ...rows,
+            setDraft((prev) => [
+              ...prev,
               {
                 memberId: null,
-                name: `Player ${rows.length + 1}`,
+                name: `Player ${prev.length + 1}`,
                 courseHandicap: 18,
                 groupCode: "A",
-                sortOrder: rows.length,
+                sortOrder: prev.length,
               },
             ])
           }
@@ -504,11 +518,13 @@ function PlayersEditor({
           type="button"
           className="btn-solid"
           disabled={busy}
-          onClick={() => onSave(rows)}
+          onClick={() => void persist(draft, "플레이어/조 저장됨")}
         >
           플레이어/조 저장
         </button>
       </div>
+      {note && <p className="text-sm text-[var(--lime)]">{note}</p>}
+      {saveError && <p className="text-sm text-red-200">{saveError}</p>}
       <div className="overflow-x-auto rounded-sm border border-white/10 bg-black/20">
         <table className="w-full min-w-[32rem] text-sm">
           <thead>
@@ -520,8 +536,8 @@ function PlayersEditor({
             </tr>
           </thead>
           <tbody>
-            {rows.map((p, i) => (
-              <tr key={p.id || i} className="border-b border-white/5">
+            {draft.map((p, i) => (
+              <tr key={p.id || `new-${i}`} className="border-b border-white/5">
                 <td className="px-2 py-1.5">
                   <input
                     className="w-40 rounded-sm border border-white/15 bg-black/30 px-2 py-2 text-[var(--foam)] outline-none focus:border-[var(--lime)]"
@@ -555,7 +571,9 @@ function PlayersEditor({
                   <button
                     type="button"
                     className="text-sm text-[var(--foam)]/45 hover:text-red-200"
-                    onClick={() => onLocal(rows.filter((_, idx) => idx !== i))}
+                    onClick={() =>
+                      setDraft((prev) => prev.filter((_, idx) => idx !== i))
+                    }
                   >
                     삭제
                   </button>

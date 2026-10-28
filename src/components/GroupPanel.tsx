@@ -16,7 +16,9 @@ export default function GroupPanel({
   group: string;
 }) {
   const groupCode = group.toUpperCase();
-  const { state, setState, loading, error } = useRoundState({ slug });
+  const { state, setState, applyServerState, loading, error } = useRoundState({
+    slug,
+  });
 
   const players = useMemo(
     () =>
@@ -44,7 +46,7 @@ export default function GroupPanel({
       }),
     });
     const body = (await res.json()) as { state?: RoundState; error?: string };
-    if (body.state) setState(body.state);
+    if (body.state) applyServerState(body.state);
   }
 
   if (loading && !state) {

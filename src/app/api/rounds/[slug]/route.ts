@@ -5,16 +5,21 @@ import type { TeeColor } from "@/lib/types";
 
 type Ctx = { params: Promise<{ slug: string }> };
 
+export const dynamic = "force-dynamic";
+
 export async function GET(_req: Request, ctx: Ctx) {
   const { slug } = await ctx.params;
   const state = await getStore().getRound(slug);
   if (!state) {
     return NextResponse.json({ error: "대회를 찾을 수 없습니다." }, { status: 404 });
   }
-  return NextResponse.json({
-    state,
-    admin: await isAdminFor(slug),
-  });
+  return NextResponse.json(
+    {
+      state,
+      admin: await isAdminFor(slug),
+    },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 export async function PATCH(req: Request, ctx: Ctx) {
