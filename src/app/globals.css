@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #062416;
+  --fairway: #0a3d28;
+  --canopy: #04180f;
+  --lime: #d6f06a;
+  --foam: #eef6ea;
+  --mist-top: rgba(120, 180, 140, 0.18);
+  --background: var(--canopy);
+  --foreground: var(--foam);
+  --font-display: var(--font-syne);
+  --font-sans: var(--font-manrope);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-manrope);
+  --font-display: var(--font-syne);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-manrope), system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-syne), var(--font-manrope), system-ui, sans-serif;
+  font-weight: 700;
+}
+
+.bg-fairway {
+  background:
+    radial-gradient(ellipse 80% 55% at 15% 10%, rgba(214, 240, 106, 0.16), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 90% 20%, rgba(46, 120, 80, 0.45), transparent 50%),
+    linear-gradient(165deg, #063222 0%, #0a3d28 42%, #04180f 100%);
+}
+
+.bg-mist {
+  background-image:
+    linear-gradient(rgba(238, 246, 234, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(238, 246, 234, 0.03) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, black, transparent 75%);
+  opacity: 0.55;
+}
+
+.field {
+  width: 3.25rem;
+  border-radius: 0.2rem;
+  border: 1px solid rgba(238, 246, 234, 0.12);
+  background: rgba(0, 0, 0, 0.28);
+  padding: 0.45rem 0.4rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--foam);
+  outline: none;
+}
+
+.field:focus {
+  border-color: var(--lime);
+}
+
+.field-strong {
+  border-color: rgba(214, 240, 106, 0.28);
+  background: rgba(214, 240, 106, 0.08);
+  font-weight: 600;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-rise {
+  animation: rise 0.7s ease-out both;
+}
+
+.animate-rise-delay {
+  animation: rise 0.7s ease-out 0.12s both;
+}
+
+.animate-rise-delay-2 {
+  animation: rise 0.7s ease-out 0.22s both;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 0.35;
+}
