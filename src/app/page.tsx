@@ -199,27 +199,26 @@ export default function HomePage() {
               <p className="text-sm font-medium text-[var(--foam)]">새 대회</p>
               <div className="block text-xs text-[var(--foam)]/45">
                 날짜
-                <input
-                  ref={dateInputRef}
-                  type="date"
-                  className="sr-only"
-                  value={date}
-                  onChange={(e) => {
-                    if (e.target.value) setDate(e.target.value);
-                  }}
-                  tabIndex={-1}
-                  aria-hidden
-                />
-                <div className="mt-1 flex gap-2">
+                <p className="mt-1 text-sm font-semibold text-[var(--foam)]">
+                  {formatDateLabel(date)}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <input
+                    ref={dateInputRef}
+                    type="date"
+                    className="min-h-[2.5rem] min-w-[10rem] flex-1 rounded-sm border border-white/15 bg-black/30 px-3 py-2 text-sm text-[var(--foam)] outline-none focus:border-[var(--lime)] [color-scheme:dark]"
+                    value={date}
+                    onChange={(e) => {
+                      if (e.target.value) setDate(e.target.value);
+                    }}
+                    aria-label="대회 날짜"
+                  />
                   <button
                     type="button"
-                    className="btn-ghost min-w-0 flex-1 justify-between gap-2 px-3 text-left"
+                    className="btn-solid shrink-0"
                     onClick={openDatePicker}
                   >
-                    <span className="truncate text-sm font-semibold text-[var(--foam)]">
-                      {formatDateLabel(date)}
-                    </span>
-                    <span className="shrink-0 text-[var(--lime)]">날짜 선택</span>
+                    날짜 선택
                   </button>
                   <button
                     type="button"
