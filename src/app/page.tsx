@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import CourseEditor from "@/components/CourseEditor";
@@ -8,19 +8,47 @@ import MemberEditor from "@/components/MemberEditor";
 import { TEE_COLOR_LABELS } from "@/lib/courses";
 import type { GolfCourse, Member, RoundListItem } from "@/lib/types";
 
+function todayIso(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatDateLabel(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const dt = new Date(y, m - 1, d);
+  const weekday = ["일", "월", "화", "수", "목", "금", "토"][dt.getDay()];
+  return `${y}년 ${m}월 ${d}일 (${weekday})`;
+}
+
 export default function HomePage() {
   const router = useRouter();
+  const dateInputRef = useRef<HTMLInputElement>(null);
   const [rounds, setRounds] = useState<RoundListItem[]>([]);
   const [courses, setCourses] = useState<GolfCourse[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [admin, setAdmin] = useState(false);
   const [pin, setPin] = useState("");
   const [name, setName] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayIso());
   const [courseId, setCourseId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [manage, setManage] = useState<"none" | "courses" | "members">("none");
+
+  function openDatePicker() {
+    const el = dateInputRef.current;
+    if (!el) return;
+    try {
+      el.showPicker?.();
+    } catch {
+      el.focus();
+      el.click();
+    }
+  }
 
   const load = useCallback(async () => {
     const res = await fetch("/api/rounds", { cache: "no-store" });
@@ -169,15 +197,39 @@ export default function HomePage() {
           ) : (
             <>
               <p className="text-sm font-medium text-[var(--foam)]">새 대회</p>
-              <label className="block text-xs text-[var(--foam)]/45">
+              <div className="block text-xs text-[var(--foam)]/45">
                 날짜
                 <input
+                  ref={dateInputRef}
                   type="date"
-                  className="mt-1 w-full rounded-sm border border-white/15 bg-black/30 px-3 py-2 text-[var(--foam)] outline-none focus:border-[var(--lime)]"
+                  className="sr-only"
                   value={date}
-                  onChange={(e) => setDate(e.target.value)}
+                  onChange={(e) => {
+                    if (e.target.value) setDate(e.target.value);
+                  }}
+                  tabIndex={-1}
+                  aria-hidden
                 />
-              </label>
+                <div className="mt-1 flex gap-2">
+                  <button
+                    type="button"
+                    className="btn-ghost min-w-0 flex-1 justify-between gap-2 px-3 text-left"
+                    onClick={openDatePicker}
+                  >
+                    <span className="truncate text-sm font-semibold text-[var(--foam)]">
+                      {formatDateLabel(date)}
+                    </span>
+                    <span className="shrink-0 text-[var(--lime)]">날짜 선택</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost shrink-0"
+                    onClick={() => setDate(todayIso())}
+                  >
+                    오늘
+                  </button>
+                </div>
+              </div>
               <label className="block text-xs text-[var(--foam)]/45">
                 골프 코스
                 <select
